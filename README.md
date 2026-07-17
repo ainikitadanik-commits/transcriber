@@ -89,6 +89,15 @@ Token используется только для загрузки моделе
 
 ## Запуск из исходников
 
+Клонируйте репозиторий:
+
+```bash
+git clone https://github.com/ainikitadanik-commits/transcriber.git
+cd transcriber
+```
+
+Установите зависимости в отдельное окружение:
+
 ```bash
 brew install python@3.12 ffmpeg
 python3.12 -m venv .venv
