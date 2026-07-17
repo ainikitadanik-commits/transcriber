@@ -1,0 +1,13 @@
+GigaAM
+Исходный проект: https://github.com/salute-developers/GigaAM
+Лицензия: MIT
+
+pyannote segmentation-3.0
+Модель загружается пользователем с Hugging Face при первом запуске.
+Источник: https://huggingface.co/pyannote/segmentation-3.0
+Лицензия: MIT
+
+pyannote speaker-diarization-community-1
+Модель загружается пользователем с Hugging Face при первом запуске.
+Источник: https://huggingface.co/pyannote/speaker-diarization-community-1
+Лицензия: CC BY 4.0

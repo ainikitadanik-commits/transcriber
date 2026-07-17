@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-gigaam-transcriber"
+version = "0.1.1"
+description = "Local long-form meeting transcription with GigaAM"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "Flask>=3.1,<4",
+  "python-docx>=1.2,<2",
+  "gigaam[longform] @ git+https://github.com/salute-developers/GigaAM.git@559d88d6b72541412743929f633a6ae7c9950b85",
+]
+
+[project.scripts]
+transcribe-local = "transcriber.cli:main"
+transcribe-ui = "transcriber.web:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

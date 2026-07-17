@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Транскрибатор</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div class="brand-mark" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div>
+          <p class="eyebrow">Локально на вашем Mac</p>
+          <h1>Транскрибатор</h1>
+          <p class="lead">Превратите запись встречи в аккуратный текст с таймкодами.</p>
+        </div>
+      </header>
+
+      <section class="card">
+        <form id="form">
+          <div class="parts-list" id="parts-list">
+            <div class="part-row">
+              <label class="dropzone">
+                <input class="part-input" name="files" type="file" accept=".webm,.mp4,.wav,.mp3,.m4a,.flac,.ogg,.aac">
+                <span class="part-number">Часть 1</span>
+                <span class="upload-icon" aria-hidden="true">↑</span>
+                <strong class="drop-title">Перетащите запись сюда</strong>
+                <span class="drop-note">или нажмите, чтобы выбрать файл</span>
+                <small>WEBM, MP4, MP3, M4A и другие аудиоформаты</small>
+              </label>
+              <button class="remove-part hidden" type="button" aria-label="Удалить часть">×</button>
+            </div>
+          </div>
+          <button class="add-part" id="add-part" type="button">
+            <span aria-hidden="true">＋</span> Добавить следующую часть
+          </button>
+
+          <div class="settings">
+            <label class="field">
+              <span>Обработка</span>
+              <select name="device" id="device">
+                <option value="auto">Автоматически</option>
+                <option value="mps">Apple Silicon (MPS)</option>
+                <option value="cpu">Процессор (CPU)</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Модель распознавания</span>
+              <select name="model" id="model">
+                <option value="v3_e2e_rnnt">RNNT — основная</option>
+                <option value="v3_e2e_ctc">CTC — для сравнения</option>
+              </select>
+            </label>
+
+            <details class="token-box">
+              <summary>Токен для первого запуска</summary>
+              <div class="token-content">
+                <label for="hf-token">Hugging Face token</label>
+                <input id="hf-token" name="hf_token" type="password" autocomplete="off" placeholder="hf_••••••••">
+                <small>Перед первым запуском примите условия <a href="https://huggingface.co/pyannote/segmentation-3.0" target="_blank" rel="noreferrer">распознавания речи</a>, а для спикеров — ещё и <a href="https://huggingface.co/pyannote/speaker-diarization-community-1" target="_blank" rel="noreferrer">модели Community‑1</a>. Токен используется только для загрузки моделей, затем удаляется. Запись обрабатывается офлайн и остаётся на Mac.</small>
+              </div>
+            </details>
+          </div>
+
+          <div class="quality-options">
+            <label class="quality-option">
+              <input type="checkbox" name="recover_gaps" id="recover-gaps" checked>
+              <span>Проверять пропуски повторно</span>
+              <small>Медленнее, но помогает вернуть тихие и пропущенные реплики.</small>
+            </label>
+            <div class="quality-option enhancement-option">
+              <span>Тихие голоса</span>
+              <div class="segmented" role="radiogroup" aria-label="Обработка тихих голосов">
+                <label><input type="radio" name="audio_enhancement" value="auto" checked><span>Авто</span></label>
+                <label><input type="radio" name="audio_enhancement" value="on"><span>Вкл</span></label>
+                <label><input type="radio" name="audio_enhancement" value="off"><span>Выкл</span></label>
+              </div>
+              <small>Авто оценивает громкость каждой части отдельно.</small>
+            </div>
+          </div>
+
+          <label class="speaker-option">
+            <input type="checkbox" name="diarization" id="diarization">
+            <span class="switch" aria-hidden="true"></span>
+            <span class="speaker-copy">
+              <strong>Разделить по спикерам</strong>
+              <small>Добавит подписи «Спикер 1», «Спикер 2» и займёт немного больше времени.</small>
+            </span>
+            <select name="speaker_count" id="speaker-count" aria-label="Количество участников" disabled>
+              <option value="">Авто</option>
+              <option value="2">2 участника</option>
+              <option value="3">3 участника</option>
+              <option value="4">4 участника</option>
+              <option value="5">5 участников</option>
+              <option value="6">6 участников</option>
+            </select>
+          </label>
+
+          <button class="primary" id="submit" type="submit" disabled>
+            <span>Начать транскрибацию</span>
+            <span class="arrow" aria-hidden="true">→</span>
+          </button>
+        </form>
+
+        <section class="status hidden" id="status" aria-live="polite">
+          <div class="spinner" id="spinner" aria-hidden="true"></div>
+          <div class="status-copy">
+            <div class="status-heading">
+              <strong id="status-title">Обрабатываем запись</strong>
+              <strong id="progress-percent">0%</strong>
+            </div>
+            <p id="status-message">Это может занять некоторое время.</p>
+            <div class="progress-track" id="progress-track" role="progressbar" aria-label="Ориентировочный прогресс транскрибации" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="progress-bar"></span>
+            </div>
+            <small class="progress-note">Ориентировочный прогресс</small>
+          </div>
+        </section>
+
+        <section class="result hidden" id="result">
+          <div class="success-icon" aria-hidden="true">✓</div>
+          <div>
+            <h2>Готово</h2>
+            <p id="result-note">Файлы транскрипции созданы.</p>
+          </div>
+          <div class="downloads">
+            <a id="txt-link" class="download" href="#">Скачать TXT</a>
+            <a id="docx-link" class="download" href="#">Скачать DOCX</a>
+            <a id="json-link" class="download secondary" href="#">Скачать JSON</a>
+          </div>
+        </section>
+      </section>
+
+      <footer>
+        <span>GigaAM v3</span>
+        <span class="dot"></span>
+        <span>Данные остаются на устройстве</span>
+      </footer>
+    </main>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

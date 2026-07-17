@@ -1,0 +1,1 @@
+Required so python-docx can resolve ../templates in a frozen runtime.
