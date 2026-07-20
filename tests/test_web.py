@@ -37,6 +37,14 @@ class WebTests(unittest.TestCase):
         self.assertIn("Ориентировочный прогресс", response.get_data(as_text=True))
         self.assertIn("Открыть записи", response.get_data(as_text=True))
         self.assertIn("Открыть транскрипции", response.get_data(as_text=True))
+        self.assertIn("Из файла", response.get_data(as_text=True))
+        self.assertIn("Рилтайм", response.get_data(as_text=True))
+        self.assertIn("Транскрибация в реальном времени", response.get_data(as_text=True))
+        self.assertIn('id="live-start"', response.get_data(as_text=True))
+        self.assertIn('id="live-pause"', response.get_data(as_text=True))
+        self.assertIn('id="live-stop"', response.get_data(as_text=True))
+        self.assertIn('id="live-timer"', response.get_data(as_text=True))
+        self.assertIn("Пока запуск недоступен", response.get_data(as_text=True))
 
     def test_open_folder_uses_finder_for_whitelisted_storage(self):
         with tempfile.TemporaryDirectory() as directory:

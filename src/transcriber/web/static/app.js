@@ -13,6 +13,24 @@ const diarization = document.querySelector("#diarization");
 const speakerCount = document.querySelector("#speaker-count");
 const recoverGaps = document.querySelector("#recover-gaps");
 const folderMessage = document.querySelector("#folder-message");
+const modeButtons = document.querySelectorAll("[data-mode]");
+const fileModePanel = document.querySelector("#file-mode-panel");
+const liveModePanel = document.querySelector("#live-mode-panel");
+
+function selectMode(mode) {
+  const liveMode = mode === "live";
+  fileModePanel.classList.toggle("hidden", liveMode);
+  liveModePanel.classList.toggle("hidden", !liveMode);
+  modeButtons.forEach((button) => {
+    const active = button.dataset.mode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+}
+
+modeButtons.forEach((button) => {
+  button.addEventListener("click", () => selectMode(button.dataset.mode));
+});
 
 const stageCaps = {
   uploading: 4,
