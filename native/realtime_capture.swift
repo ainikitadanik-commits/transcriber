@@ -1,7 +1,269 @@
+import AppKit
 import AVFoundation
 import CoreMedia
+import Darwin
 import Foundation
 @preconcurrency import ScreenCaptureKit
+
+@MainActor
+final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
+    private let dataRoot = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Транскрибатор")
+    private var runtimeProcess: Process?
+    private var logHandle: FileHandle?
+    private var statusItem: NSStatusItem?
+    private var startupTimer: Timer?
+    private var startupAttempts = 0
+    private var didStart = false
+    private let interfaceURL = URL(string: "http://127.0.0.1:7860")!
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        start()
+    }
+
+    func start() {
+        guard !didStart else { return }
+        didStart = true
+        configureMenuBar()
+        if interfaceIsAvailable() {
+            openInterface()
+            return
+        }
+        do {
+            try launchRuntime()
+            startupTimer = Timer.scheduledTimer(
+                timeInterval: 0.25,
+                target: self,
+                selector: #selector(pollRuntime),
+                userInfo: nil,
+                repeats: true
+            )
+        } catch {
+            showError(error.localizedDescription)
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let process = runtimeProcess, process.isRunning {
+            process.terminate()
+        }
+        try? logHandle?.close()
+    }
+
+    private func configureMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem?.button?.title = "Т"
+        statusItem?.button?.toolTip = "Транскрибатор"
+
+        let menu = NSMenu()
+        menu.addItem(
+            withTitle: "Открыть транскрибатор",
+            action: #selector(openInterfaceFromMenu),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: "Открыть транскрипции",
+            action: #selector(openOutputFolder),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: "Лицензии и приватность",
+            action: #selector(openLegalDocuments),
+            keyEquivalent: ""
+        )
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(
+            withTitle: "О приложении",
+            action: #selector(openAboutPanel),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: "Завершить",
+            action: #selector(quitApplication),
+            keyEquivalent: "q"
+        )
+        menu.items.forEach { $0.target = self }
+        statusItem?.menu = menu
+    }
+
+    private func launchRuntime() throws {
+        guard
+            let resources = Bundle.main.resourceURL,
+            let executable = Bundle.main.executableURL
+        else {
+            throw productError("Не удалось определить ресурсы приложения.")
+        }
+        let runtime = resources
+            .appendingPathComponent("runtime/transcriber-runtime/transcriber-runtime")
+        guard FileManager.default.isExecutableFile(atPath: runtime.path) else {
+            throw productError("В приложении не найден локальный runtime.")
+        }
+
+        let logs = dataRoot.appendingPathComponent("logs")
+        try FileManager.default.createDirectory(
+            at: logs,
+            withIntermediateDirectories: true
+        )
+        let logURL = logs.appendingPathComponent("transcriber.log")
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        }
+        let handle = try FileHandle(forWritingTo: logURL)
+        try handle.seekToEnd()
+        logHandle = handle
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["TRANSCRIBER_DATA_DIR"] = dataRoot.path
+        environment["TRANSCRIBER_GIGAAM_MODELS_DIR"] = resources
+            .appendingPathComponent("models/gigaam").path
+        environment["TRANSCRIBER_CAPTURE_HELPER"] = executable.path
+        environment["HF_HOME"] = dataRoot
+            .appendingPathComponent("models/huggingface").path
+        environment["HF_HUB_DISABLE_TELEMETRY"] = "1"
+        environment["PATH"] = [
+            resources.appendingPathComponent("bin").path,
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ].joined(separator: ":")
+
+        let process = Process()
+        process.executableURL = runtime
+        process.arguments = ["--no-browser"]
+        process.environment = environment
+        process.currentDirectoryURL = resources
+        process.standardOutput = handle
+        process.standardError = handle
+        process.terminationHandler = { [weak self] process in
+            Task { @MainActor in
+                guard process.terminationStatus != 0 else { return }
+                self?.showError(
+                    "Локальный процесс завершился с кодом \(process.terminationStatus). "
+                    + "Откройте журнал приложения."
+                )
+            }
+        }
+        try process.run()
+        runtimeProcess = process
+    }
+
+    private func interfaceIsAvailable() -> Bool {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+
+        var timeout = timeval(tv_sec: 0, tv_usec: 100_000)
+        setsockopt(
+            descriptor,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            &timeout,
+            socklen_t(MemoryLayout<timeval>.size)
+        )
+        setsockopt(
+            descriptor,
+            SOL_SOCKET,
+            SO_RCVTIMEO,
+            &timeout,
+            socklen_t(MemoryLayout<timeval>.size)
+        )
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(7_860).bigEndian
+        guard inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) == 1 else {
+            return false
+        }
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(
+                    descriptor,
+                    $0,
+                    socklen_t(MemoryLayout<sockaddr_in>.size)
+                ) == 0
+            }
+        }
+        guard connected else { return false }
+
+        let request = "GET /api/realtime/status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n"
+        let sent = request.withCString {
+            Darwin.send(descriptor, $0, strlen($0), 0)
+        }
+        guard sent == request.utf8.count else { return false }
+
+        var response = [UInt8](repeating: 0, count: 4_096)
+        let received = Darwin.recv(descriptor, &response, response.count, 0)
+        guard
+            received > 0,
+            let text = String(bytes: response.prefix(received), encoding: .utf8)
+        else {
+            return false
+        }
+        return text.contains(" 200 ") && text.contains("\"audio_format\"")
+    }
+
+    private func openInterface() {
+        NSWorkspace.shared.open(interfaceURL)
+    }
+
+    private func showError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Не удалось запустить транскрибатор"
+        alert.informativeText = message
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Понятно")
+        alert.runModal()
+    }
+
+    private func productError(_ message: String) -> NSError {
+        NSError(
+            domain: Bundle.main.bundleIdentifier ?? "Transcriber",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+
+    @objc private func openInterfaceFromMenu() {
+        openInterface()
+    }
+
+    @objc private func pollRuntime() {
+        startupAttempts += 1
+        if interfaceIsAvailable() {
+            startupTimer?.invalidate()
+            startupTimer = nil
+            openInterface()
+        } else if startupAttempts >= 80 {
+            startupTimer?.invalidate()
+            startupTimer = nil
+            showError("Локальный интерфейс не запустился. Проверьте журнал приложения.")
+        }
+    }
+
+    @objc private func openOutputFolder() {
+        let output = dataRoot.appendingPathComponent("output")
+        try? FileManager.default.createDirectory(
+            at: output,
+            withIntermediateDirectories: true
+        )
+        NSWorkspace.shared.open(output)
+    }
+
+    @objc private func openLegalDocuments() {
+        guard let resources = Bundle.main.resourceURL else { return }
+        NSWorkspace.shared.open(resources.appendingPathComponent("Лицензии"))
+    }
+
+    @objc private func openAboutPanel() {
+        NSApplication.shared.orderFrontStandardAboutPanel(nil)
+    }
+
+    @objc private func quitApplication() {
+        NSApplication.shared.terminate(nil)
+    }
+}
 
 final class EventWriter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "transcriber.capture.events")
@@ -242,14 +504,25 @@ final class TerminationWaiter: @unchecked Sendable {
 
 @main
 enum RealtimeCapture {
+    @MainActor
     static func main() async {
         let writer = EventWriter()
 
         do {
-            guard
-                let systemFD = fileDescriptor(named: "--system-fd"),
-                let microphoneFD = fileDescriptor(named: "--microphone-fd")
-            else {
+            let systemFD = fileDescriptor(named: "--system-fd")
+            let microphoneFD = fileDescriptor(named: "--microphone-fd")
+            if systemFD == nil && microphoneFD == nil {
+                guard Bundle.main.bundleURL.pathExtension == "app" else {
+                    writer.send(
+                        "error",
+                        extra: ["message": "Не переданы локальные PCM-каналы."]
+                    )
+                    Foundation.exit(2)
+                }
+                runProductApplication()
+                return
+            }
+            guard let systemFD, let microphoneFD else {
                 writer.send("error", extra: ["message": "Не переданы локальные PCM-каналы."])
                 Foundation.exit(2)
             }
@@ -336,6 +609,23 @@ enum RealtimeCapture {
             return nil
         }
         return Int32(CommandLine.arguments[index + 1])
+    }
+
+    @MainActor
+    private static func runProductApplication() {
+        let application = NSApplication.shared
+        let delegate = ProductApplicationDelegate()
+        application.setActivationPolicy(.accessory)
+        application.delegate = delegate
+        objc_setAssociatedObject(
+            application,
+            "transcriber.delegate",
+            delegate,
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        )
+        application.finishLaunching()
+        delegate.start()
+        application.run()
     }
 
     private static func runSelfTest(
