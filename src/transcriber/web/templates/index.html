@@ -20,7 +20,17 @@
       </header>
 
       <section class="card">
-        <form id="form">
+        <div class="mode-switcher" role="tablist" aria-label="Режим транскрибации">
+          <button class="mode-button active" id="mode-file" type="button" role="tab" aria-selected="true" aria-controls="file-mode-panel" data-mode="file">
+            Из файла
+          </button>
+          <button class="mode-button" id="mode-live" type="button" role="tab" aria-selected="false" aria-controls="live-mode-panel" data-mode="live">
+            Рилтайм
+          </button>
+        </div>
+
+        <div id="file-mode-panel" role="tabpanel" aria-labelledby="mode-file">
+          <form id="form">
           <div class="parts-list" id="parts-list">
             <div class="part-row">
               <label class="dropzone">
@@ -100,38 +110,86 @@
             </select>
           </label>
 
-          <button class="primary" id="submit" type="submit" disabled>
-            <span>Начать транскрибацию</span>
-            <span class="arrow" aria-hidden="true">→</span>
-          </button>
-        </form>
+            <button class="primary" id="submit" type="submit" disabled>
+              <span>Начать транскрибацию</span>
+              <span class="arrow" aria-hidden="true">→</span>
+            </button>
+          </form>
 
-        <section class="status hidden" id="status" aria-live="polite">
-          <div class="spinner" id="spinner" aria-hidden="true"></div>
-          <div class="status-copy">
-            <div class="status-heading">
-              <strong id="status-title">Обрабатываем запись</strong>
-              <strong id="progress-percent">0%</strong>
+          <section class="status hidden" id="status" aria-live="polite">
+            <div class="spinner" id="spinner" aria-hidden="true"></div>
+            <div class="status-copy">
+              <div class="status-heading">
+                <strong id="status-title">Обрабатываем запись</strong>
+                <strong id="progress-percent">0%</strong>
+              </div>
+              <p id="status-message">Это может занять некоторое время.</p>
+              <div class="progress-track" id="progress-track" role="progressbar" aria-label="Ориентировочный прогресс транскрибации" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span id="progress-bar"></span>
+              </div>
+              <small class="progress-note">Ориентировочный прогресс</small>
             </div>
-            <p id="status-message">Это может занять некоторое время.</p>
-            <div class="progress-track" id="progress-track" role="progressbar" aria-label="Ориентировочный прогресс транскрибации" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-              <span id="progress-bar"></span>
+          </section>
+
+          <section class="result hidden" id="result">
+            <div class="success-icon" aria-hidden="true">✓</div>
+            <div>
+              <h2>Готово</h2>
+              <p id="result-note">Файлы транскрипции созданы.</p>
             </div>
-            <small class="progress-note">Ориентировочный прогресс</small>
+            <div class="downloads">
+              <a id="txt-link" class="download" href="#">Скачать TXT</a>
+              <a id="docx-link" class="download" href="#">Скачать DOCX</a>
+              <a id="json-link" class="download secondary" href="#">Скачать JSON</a>
+            </div>
+          </section>
+        </div>
+
+        <section class="live-mode hidden" id="live-mode-panel" role="tabpanel" aria-labelledby="mode-live">
+          <div class="live-heading">
+            <div>
+              <p class="eyebrow">Живая встреча</p>
+              <h2>Транскрибация в реальном времени</h2>
+              <p>Системный звук собеседников и ваш микрофон будут обрабатываться локально.</p>
+            </div>
+            <span class="live-state" id="live-state">Проверяем</span>
           </div>
+
+          <div class="live-meter" aria-label="Продолжительность встречи">
+            <span class="live-dot" aria-hidden="true"></span>
+            <time id="live-timer" datetime="PT0S">00:00:00</time>
+            <span>Системный звук + микрофон</span>
+          </div>
+
+          <div class="live-sources" aria-label="Состояние источников звука">
+            <span id="system-audio-state">Системный звук: ожидаем</span>
+            <span id="microphone-state">Микрофон: ожидаем</span>
+            <span class="audio-format">PCM 16 кГц · mono</span>
+          </div>
+
+          <div class="live-transcript" aria-live="polite">
+            <strong>Живой текст</strong>
+            <p id="live-transcript-text">После запуска здесь будет появляться распознанная речь с небольшой задержкой.</p>
+          </div>
+
+          <div class="live-actions">
+            <button class="primary" id="live-start" type="button" disabled>Начать встречу</button>
+            <button class="live-secondary" id="live-pause" type="button" disabled>Пауза</button>
+            <button class="live-secondary danger" id="live-stop" type="button" disabled>Завершить</button>
+          </div>
+          <p class="live-notice" id="live-notice">Проверяем локальный помощник захвата…</p>
         </section>
 
-        <section class="result hidden" id="result">
-          <div class="success-icon" aria-hidden="true">✓</div>
-          <div>
-            <h2>Готово</h2>
-            <p id="result-note">Файлы транскрипции созданы.</p>
+        <section class="storage-links" aria-labelledby="storage-title">
+          <div class="storage-copy">
+            <strong id="storage-title">Файлы на этом Mac</strong>
+            <small>Откройте папку в Finder и удалите ненужные записи или результаты вручную.</small>
           </div>
-          <div class="downloads">
-            <a id="txt-link" class="download" href="#">Скачать TXT</a>
-            <a id="docx-link" class="download" href="#">Скачать DOCX</a>
-            <a id="json-link" class="download secondary" href="#">Скачать JSON</a>
+          <div class="storage-actions">
+            <button type="button" data-open-folder="input">Открыть записи</button>
+            <button type="button" data-open-folder="output">Открыть транскрипции</button>
           </div>
+          <small class="folder-message hidden" id="folder-message" aria-live="polite"></small>
         </section>
       </section>
 

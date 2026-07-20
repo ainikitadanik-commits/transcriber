@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import threading
 import uuid
 import webbrowser
@@ -20,6 +21,7 @@ from .core import (
     run,
 )
 from .models import configure_storage, data_dir, prepare_pyannote_models
+from .realtime import capture_manager
 
 
 DATA_DIR = data_dir()
@@ -247,6 +249,40 @@ def status(job_id: str):
 @app.get("/files/<path:filename>")
 def result_file(filename: str):
     return send_from_directory(OUTPUT_DIR, filename, as_attachment=True)
+
+
+@app.post("/api/open-folder/<folder_name>")
+def open_folder(folder_name: str):
+    folders = {"input": INPUT_DIR, "output": OUTPUT_DIR}
+    folder = folders.get(folder_name)
+    if folder is None:
+        return jsonify(error="Неизвестная папка."), 404
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            ["open", str(folder)], check=True, capture_output=True, text=True
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        return jsonify(error=f"Не удалось открыть папку: {error}"), 500
+    return jsonify(message="Папка открыта в Finder.")
+
+
+@app.get("/api/realtime/status")
+def realtime_status():
+    return jsonify(capture_manager.snapshot())
+
+
+@app.post("/api/realtime/start")
+def realtime_start():
+    try:
+        return jsonify(capture_manager.start()), 202
+    except RuntimeError as error:
+        return jsonify(error=str(error)), 409
+
+
+@app.post("/api/realtime/stop")
+def realtime_stop():
+    return jsonify(capture_manager.stop())
 
 
 def build_parser() -> argparse.ArgumentParser:
