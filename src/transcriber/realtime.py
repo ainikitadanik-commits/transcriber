@@ -13,6 +13,39 @@ from typing import Any
 from .models import data_dir
 
 
+PCM_SAMPLE_RATE = 16_000
+PCM_CHANNELS = 1
+PCM_SAMPLE_WIDTH = 2
+PCM_BUFFER_SECONDS = 120
+PCM_BUFFER_LIMIT = (
+    PCM_SAMPLE_RATE * PCM_CHANNELS * PCM_SAMPLE_WIDTH * PCM_BUFFER_SECONDS
+)
+
+
+class PCMBuffer:
+    def __init__(self, limit: int = PCM_BUFFER_LIMIT) -> None:
+        self._limit = limit
+        self._data = bytearray()
+        self.total_bytes = 0
+
+    def append(self, data: bytes) -> None:
+        self._data.extend(data)
+        self.total_bytes += len(data)
+        overflow = len(self._data) - self._limit
+        if overflow > 0:
+            del self._data[:overflow]
+
+    def drain(self, max_bytes: int | None = None) -> bytes:
+        count = len(self._data) if max_bytes is None else min(max_bytes, len(self._data))
+        data = bytes(self._data[:count])
+        del self._data[:count]
+        return data
+
+    @property
+    def buffered_bytes(self) -> int:
+        return len(self._data)
+
+
 def capture_helper_path() -> Path:
     configured = os.getenv("TRANSCRIBER_CAPTURE_HELPER")
     if configured:
@@ -39,12 +72,32 @@ class RealtimeCaptureManager:
             "microphone": False,
         }
         self._started_at: float | None = None
+        self._audio = {
+            "system": PCMBuffer(),
+            "microphone": PCMBuffer(),
+        }
 
     def snapshot(self) -> dict[str, Any]:
         helper = capture_helper_path()
         with self._lock:
             state = dict(self._state)
             started_at = self._started_at
+            state["audio_format"] = {
+                "sample_rate": PCM_SAMPLE_RATE,
+                "channels": PCM_CHANNELS,
+                "sample_width": PCM_SAMPLE_WIDTH,
+                "encoding": "pcm_s16le",
+            }
+            state["system_buffered_seconds"] = round(
+                self._audio["system"].buffered_bytes
+                / (PCM_SAMPLE_RATE * PCM_CHANNELS * PCM_SAMPLE_WIDTH),
+                2,
+            )
+            state["microphone_buffered_seconds"] = round(
+                self._audio["microphone"].buffered_bytes
+                / (PCM_SAMPLE_RATE * PCM_CHANNELS * PCM_SAMPLE_WIDTH),
+                2,
+            )
         state["available"] = helper.is_file() and os.access(helper, os.X_OK)
         state["elapsed_seconds"] = (
             max(0, int(time.monotonic() - started_at)) if started_at else 0
@@ -69,20 +122,75 @@ class RealtimeCaptureManager:
                 "microphone": False,
             }
             self._started_at = None
-            self._process = subprocess.Popen(
-                [str(helper)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-            )
+            self._audio = {
+                "system": PCMBuffer(),
+                "microphone": PCMBuffer(),
+            }
+            system_read, system_write = os.pipe()
+            microphone_read, microphone_write = os.pipe()
+            try:
+                self._process = subprocess.Popen(
+                    [
+                        str(helper),
+                        "--system-fd",
+                        str(system_write),
+                        "--microphone-fd",
+                        str(microphone_write),
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    pass_fds=(system_write, microphone_write),
+                )
+            except OSError as error:
+                os.close(system_read)
+                os.close(microphone_read)
+                self._state.update(
+                    status="error",
+                    message=f"Не удалось запустить локальный помощник: {error}",
+                )
+                raise RuntimeError(self._state["message"]) from error
+            finally:
+                os.close(system_write)
+                os.close(microphone_write)
             process = self._process
 
+        threading.Thread(
+            target=self._read_pcm,
+            args=(process, "system", system_read),
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=self._read_pcm,
+            args=(process, "microphone", microphone_read),
+            daemon=True,
+        ).start()
         threading.Thread(
             target=self._read_events, args=(process,), daemon=True
         ).start()
         threading.Thread(target=self._wait, args=(process,), daemon=True).start()
         return self.snapshot()
+
+    def drain_audio(self, source: str, max_bytes: int | None = None) -> bytes:
+        if source not in self._audio:
+            raise ValueError(f"Неизвестный источник звука: {source}")
+        with self._lock:
+            return self._audio[source].drain(max_bytes)
+
+    def _read_pcm(
+        self,
+        process: subprocess.Popen[str],
+        source: str,
+        file_descriptor: int,
+    ) -> None:
+        with os.fdopen(file_descriptor, "rb", buffering=0) as stream:
+            while data := stream.read(32 * 1024):
+                with self._lock:
+                    if process is not self._process:
+                        return
+                    self._audio[source].append(data)
+                    self._state[f"{source}_audio"] = True
 
     def stop(self) -> dict[str, Any]:
         with self._lock:

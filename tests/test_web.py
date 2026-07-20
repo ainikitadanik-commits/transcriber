@@ -46,6 +46,7 @@ class WebTests(unittest.TestCase):
         self.assertIn('id="live-timer"', response.get_data(as_text=True))
         self.assertIn("Системный звук: ожидаем", response.get_data(as_text=True))
         self.assertIn("Микрофон: ожидаем", response.get_data(as_text=True))
+        self.assertIn("PCM 16 кГц", response.get_data(as_text=True))
 
     def test_realtime_status_exposes_capture_state(self):
         with patch.object(

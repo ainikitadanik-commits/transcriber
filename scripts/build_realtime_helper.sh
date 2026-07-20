@@ -14,6 +14,7 @@ xcrun swiftc \
   -sdk "$SDK" \
   -module-cache-path "$MODULE_CACHE" \
   -target arm64-apple-macos15.0 \
+  -framework AVFoundation \
   -framework CoreMedia \
   -framework ScreenCaptureKit \
   "$ROOT/native/realtime_capture.swift" \
