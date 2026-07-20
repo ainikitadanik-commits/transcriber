@@ -16,6 +16,13 @@ const folderMessage = document.querySelector("#folder-message");
 const modeButtons = document.querySelectorAll("[data-mode]");
 const fileModePanel = document.querySelector("#file-mode-panel");
 const liveModePanel = document.querySelector("#live-mode-panel");
+const liveState = document.querySelector("#live-state");
+const liveTimer = document.querySelector("#live-timer");
+const liveStart = document.querySelector("#live-start");
+const liveStop = document.querySelector("#live-stop");
+const liveNotice = document.querySelector("#live-notice");
+const systemAudioState = document.querySelector("#system-audio-state");
+const microphoneState = document.querySelector("#microphone-state");
 
 function selectMode(mode) {
   const liveMode = mode === "live";
@@ -31,6 +38,84 @@ function selectMode(mode) {
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => selectMode(button.dataset.mode));
 });
+
+function formatDuration(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function renderRealtime(state) {
+  const active = ["starting", "recording", "stopping"].includes(state.status);
+  liveState.textContent = {
+    idle: "Готово",
+    starting: "Разрешения",
+    recording: "Идёт запись",
+    stopping: "Завершаем",
+    error: "Ошибка",
+  }[state.status] || "Проверяем";
+  liveState.classList.toggle("recording", state.status === "recording");
+  liveState.classList.toggle("error", state.status === "error");
+  liveTimer.textContent = formatDuration(state.elapsed_seconds || 0);
+  liveTimer.setAttribute("datetime", `PT${state.elapsed_seconds || 0}S`);
+  liveNotice.textContent = state.available
+    ? state.message
+    : "Помощник захвата не собран. Перезапустите транскрибатор после обновления.";
+  systemAudioState.textContent = `Системный звук: ${state.system_audio ? "получаем" : "ожидаем"}`;
+  microphoneState.textContent = `Микрофон: ${state.microphone ? "получаем" : "ожидаем"}`;
+  systemAudioState.classList.toggle("active", Boolean(state.system_audio));
+  microphoneState.classList.toggle("active", Boolean(state.microphone));
+  liveStart.disabled = !state.available || active;
+  liveStop.disabled = !active;
+}
+
+async function refreshRealtimeStatus() {
+  try {
+    const response = await fetch("/api/realtime/status");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось проверить захват.");
+    renderRealtime(data);
+  } catch (error) {
+    renderRealtime({
+      status: "error",
+      available: false,
+      message: error.message,
+      elapsed_seconds: 0,
+    });
+  }
+}
+
+liveStart.addEventListener("click", async () => {
+  liveStart.disabled = true;
+  liveNotice.textContent = "Запускаем локальный захват…";
+  try {
+    const response = await fetch("/api/realtime/start", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось запустить захват.");
+    renderRealtime(data);
+  } catch (error) {
+    liveNotice.textContent = error.message;
+    liveState.textContent = "Ошибка";
+    liveState.classList.add("error");
+    liveStart.disabled = false;
+  }
+});
+
+liveStop.addEventListener("click", async () => {
+  liveStop.disabled = true;
+  try {
+    const response = await fetch("/api/realtime/stop", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось остановить захват.");
+    renderRealtime(data);
+  } catch (error) {
+    liveNotice.textContent = error.message;
+  }
+});
+
+refreshRealtimeStatus();
+setInterval(refreshRealtimeStatus, 1500);
 
 const stageCaps = {
   uploading: 4,

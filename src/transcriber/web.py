@@ -21,6 +21,7 @@ from .core import (
     run,
 )
 from .models import configure_storage, data_dir, prepare_pyannote_models
+from .realtime import capture_manager
 
 
 DATA_DIR = data_dir()
@@ -264,6 +265,24 @@ def open_folder(folder_name: str):
     except (OSError, subprocess.CalledProcessError) as error:
         return jsonify(error=f"Не удалось открыть папку: {error}"), 500
     return jsonify(message="Папка открыта в Finder.")
+
+
+@app.get("/api/realtime/status")
+def realtime_status():
+    return jsonify(capture_manager.snapshot())
+
+
+@app.post("/api/realtime/start")
+def realtime_start():
+    try:
+        return jsonify(capture_manager.start()), 202
+    except RuntimeError as error:
+        return jsonify(error=str(error)), 409
+
+
+@app.post("/api/realtime/stop")
+def realtime_stop():
+    return jsonify(capture_manager.stop())
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -44,7 +44,51 @@ class WebTests(unittest.TestCase):
         self.assertIn('id="live-pause"', response.get_data(as_text=True))
         self.assertIn('id="live-stop"', response.get_data(as_text=True))
         self.assertIn('id="live-timer"', response.get_data(as_text=True))
-        self.assertIn("Пока запуск недоступен", response.get_data(as_text=True))
+        self.assertIn("Системный звук: ожидаем", response.get_data(as_text=True))
+        self.assertIn("Микрофон: ожидаем", response.get_data(as_text=True))
+
+    def test_realtime_status_exposes_capture_state(self):
+        with patch.object(
+            web.capture_manager,
+            "snapshot",
+            return_value={"status": "idle", "available": True},
+        ):
+            response = self.client.get("/api/realtime/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["available"])
+
+    def test_realtime_start_and_stop_use_local_capture_manager(self):
+        with (
+            patch.object(
+                web.capture_manager,
+                "start",
+                return_value={"status": "starting", "available": True},
+            ) as start_mock,
+            patch.object(
+                web.capture_manager,
+                "stop",
+                return_value={"status": "idle", "available": True},
+            ) as stop_mock,
+        ):
+            start_response = self.client.post("/api/realtime/start")
+            stop_response = self.client.post("/api/realtime/stop")
+
+        self.assertEqual(start_response.status_code, 202)
+        self.assertEqual(stop_response.status_code, 200)
+        start_mock.assert_called_once_with()
+        stop_mock.assert_called_once_with()
+
+    def test_realtime_start_returns_actionable_error(self):
+        with patch.object(
+            web.capture_manager,
+            "start",
+            side_effect=RuntimeError("Помощник захвата не собран."),
+        ):
+            response = self.client.post("/api/realtime/start")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("не собран", response.get_json()["error"])
 
     def test_open_folder_uses_finder_for_whitelisted_storage(self):
         with tempfile.TemporaryDirectory() as directory:

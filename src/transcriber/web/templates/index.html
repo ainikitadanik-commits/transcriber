@@ -152,13 +152,18 @@
               <h2>Транскрибация в реальном времени</h2>
               <p>Системный звук собеседников и ваш микрофон будут обрабатываться локально.</p>
             </div>
-            <span class="live-state">Подготовка</span>
+            <span class="live-state" id="live-state">Проверяем</span>
           </div>
 
           <div class="live-meter" aria-label="Продолжительность встречи">
             <span class="live-dot" aria-hidden="true"></span>
             <time id="live-timer" datetime="PT0S">00:00:00</time>
             <span>Системный звук + микрофон</span>
+          </div>
+
+          <div class="live-sources" aria-label="Состояние источников звука">
+            <span id="system-audio-state">Системный звук: ожидаем</span>
+            <span id="microphone-state">Микрофон: ожидаем</span>
           </div>
 
           <div class="live-transcript" aria-live="polite">
@@ -171,7 +176,7 @@
             <button class="live-secondary" id="live-pause" type="button" disabled>Пауза</button>
             <button class="live-secondary danger" id="live-stop" type="button" disabled>Завершить</button>
           </div>
-          <p class="live-notice">Захват звука будет подключён на следующем этапе. Пока запуск недоступен.</p>
+          <p class="live-notice" id="live-notice">Проверяем локальный помощник захвата…</p>
         </section>
 
         <section class="storage-links" aria-labelledby="storage-title">
