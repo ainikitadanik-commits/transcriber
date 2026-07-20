@@ -37,15 +37,23 @@
 
 Цели:
 
+- закрыть privacy-блокер dependency telemetry;
+- исправить разрешение встроенных моделей на чистой учётной записи;
+- исправить single-instance/port ownership и продуктовый FFmpeg;
+- принять ADR-013 через подписанный Core Audio Tap spike на no-admin Mac;
 - проверить double-click launch без Terminal;
 - проверить menu bar lifecycle;
-- вручную принять system audio и microphone permissions;
+- принять system audio и microphone prompts без admin credentials;
 - подтвердить packaged file transcription;
 - синхронизировать README с product `.app`;
 - определить установочный UX в `~/Applications`;
 - добавить тест/проверку отсутствия второго чужого сервиса на порту 7860.
 
 Выход: внутренняя версия 0.2.x, пригодная для контролируемой эксплуатации.
+
+UI polish начинается после закрытия privacy, model-resolution, audio-capture
+architecture и lifecycle-блокеров. Визуальная доработка не является способом
+закрыть недоступный permission flow.
 
 ## Этап 2. Near-real-time ASR MVP
 

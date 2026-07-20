@@ -132,6 +132,49 @@ latency.
 Последствия: список поддерживаемых контейнеров проверяется именно на этой
 сборке, а не на Homebrew FFmpeg.
 
+## ADR-013. System audio без Screen Recording permission
+
+Статус: Proposed
+
+Контекст: текущий ScreenCaptureKit-helper воспроизводимо получает
+`userDeclined` у целевого пользователя. Ни пользователь, ни его коллеги не
+имеют admin-прав и не могут вручную менять защищённую Screen & System Audio
+Recording policy. Такой ручной шаг исключён из product acceptance.
+
+Рассмотренные варианты:
+
+1. оставить ScreenCaptureKit и добавить инструкцию по настройкам — отклонено,
+   потому что инструкция невыполнима целевой аудиторией;
+2. обходить TCC/MDM — запрещено платформой и политикой продукта;
+3. использовать Core Audio Tap для system audio и отдельный input-контур для
+   microphone.
+
+Предлагаемое решение: проверить вариантом signed spike private/global Core
+Audio Tap с исключением собственного процесса. System audio должен запрашивать
+`NSAudioCaptureUsageDescription` штатным пользовательским prompt без захвата
+экрана. Microphone захватывается отдельным AVFoundation/Core Audio контуром.
+
+Последствия: меняются lifecycle двух источников, permission/error state,
+создание и cleanup tap/aggregate device, реакция на смену output device.
+Стабильная Developer ID identity обязательна для проверки continuity между
+обновлениями. Корпоративный MDM-запрет не обходится и должен давать отдельное
+состояние `managed_denied`.
+
+Проверка:
+
+1. подписанный `.app` запускается на чистой no-admin учётной записи;
+2. первый Start показывает отдельные system-audio и microphone prompts без
+   admin credentials;
+3. Screen Recording вручную не включается;
+4. одновременно получен ненулевой PCM обоих источников;
+5. Stop/Quit удаляют tap и aggregate device;
+6. permission сохраняется после restart и обновления с той же identity;
+7. проверены встроенный output, наушники, Teams/Zoom/browser и MDM denial;
+8. 30-минутная сессия не оставляет виртуальные устройства.
+
+Условие принятия: все критерии spike подтверждены evidence bundle на целевом
+корпоративном Mac. После принятия ADR-009 получает статус `Superseded`.
+
 ## Шаблон новой записи
 
 ```markdown

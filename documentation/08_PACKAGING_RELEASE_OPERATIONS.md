@@ -47,10 +47,13 @@
   component ledger;
 - GigaAM dependency остаётся закреплённой на конкретный commit;
 - runtime включает web templates/static и ресурсы python-docx;
+- каждый вложенный Mach-O имеет minimum macOS не выше заявленных 15.0;
 - product build использует специально собранный FFmpeg;
 - product FFmpeg поддерживает локальные протоколы `file` и `pipe`, а также
   muxer `pcm_s16le`, необходимый GigaAM для передачи raw PCM через stdout;
 - модели GigaAM проверяются до копирования;
+- clean-account test подтверждает, что runtime использует модели из
+  `Contents/Resources/models/gigaam`, а не только developer cache;
 - pyannote models не встраиваются и получаются пользователем;
 - license bundle соответствует фактическому runtime;
 - итоговый `.app` проходит `codesign --verify`.
@@ -71,6 +74,15 @@
 
 На момент фиксации постоянная signing identity отсутствует, поэтому 0.2.0 не
 считается готовой к внешнему распространению.
+
+Текущий artifact не является эталоном совместимости: native shell имеет
+minimum macOS 15.0, но embedded Python framework и FFmpeg — 26.0. Release
+runtime и media layer должны собираться в macOS-15-compatible окружении, а
+minimum-OS audit должен проверять все Mach-O, не только shell.
+
+Подпись выполняется bottom-up: каждый вложенный Mach-O получает Developer ID
+и hardened runtime до подписи внешнего `.app`. `codesign --deep` не является
+заменой явной подписи вложенных бинарников.
 
 ## DMG
 
@@ -119,11 +131,19 @@ JSON schema версионируется отдельно и не обязана
 
 - component ledger пересобран;
 - лицензии включены;
+- лицензии `python-docx`, `transformers` и всех остальных реально включённых
+  компонентов найдены в release license bundle;
+- все Mach-O проходят minimum-OS audit для macOS 15.0;
 - `codesign --verify --deep --strict` успешен;
 - notarization/stapling успешны для внешнего релиза;
 - `hdiutil verify` успешен;
 - SHA-256 записан;
 - проверена чистая user account / Mac без dev environment.
+- system audio и microphone разрешаются системными пользовательскими prompt
+  без admin credentials; ручное изменение защищённых настроек не является
+  допустимым install step;
+- bundled GigaAM weights реально разрешаются на чистой учётной записи;
+- dependency telemetry отключена до импорта библиотек.
 
 ### Publication
 

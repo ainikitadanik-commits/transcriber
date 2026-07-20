@@ -29,6 +29,7 @@
 | SEC-002 | Записи и текст не передаются в Hugging Face |
 | SEC-003 | Собственной телеметрии и аналитики нет |
 | SEC-004 | `HF_HUB_DISABLE_TELEMETRY=1` устанавливается runtime |
+| SEC-004A | `PYANNOTE_METRICS_ENABLED=0` устанавливается до импорта `pyannote.audio` |
 | SEC-005 | `HF_TOKEN` удаляется из environment до ASR |
 | SEC-006 | Token не пишется в `.env`, config, URL, CLI history или log |
 | SEC-007 | После получения моделей включаются `HF_HUB_OFFLINE=1` и `TRANSFORMERS_OFFLINE=1` |
@@ -64,15 +65,27 @@
 
 ## macOS-разрешения
 
-Приложение запрашивает:
+Текущая сборка запрашивает:
 
 - microphone — для голоса пользователя;
 - system audio / screen recording — для речи собеседников через
   ScreenCaptureKit.
 
-Разрешения должны принадлежать одной постоянной идентичности:
+Этот ScreenCaptureKit-контур не прошёл acceptance на целевой no-admin
+учётной записи: macOS вернула `userDeclined`, а пользователь не может вручную
+изменить Screen Recording policy. В [ADR-013](11_ARCHITECTURE_DECISIONS.md)
+зафиксирован Proposed-переход к Core Audio Tap для отдельного system-audio
+prompt без захвата экрана. До успешного подписанного прототипа FR-RT-001
+остаётся `BLOCKED`.
+
+Разрешения должны принадлежать одной постоянной подписанной идентичности:
 `com.ainikitadanik.transcriber`. Изменение bundle ID приведёт к повторным
-запросам и запрещено без миграционного решения.
+запросам и запрещено без миграционного решения. Ad-hoc CDHash не считается
+постоянной release identity.
+
+Приложение не обходит MDM/PPPC. Если корпоративный профиль запрещает audio
+capture, требуется изменение профиля владельцем IT; отсутствие admin-прав у
+пользователя не должно маскироваться как исправимый локально дефект.
 
 ## Локальное хранение и удаление
 

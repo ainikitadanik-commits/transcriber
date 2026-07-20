@@ -48,6 +48,8 @@ mock не подтверждает пользовательский резуль
 
 - запуск `.app` двойным нажатием;
 - корректная идентичность и разрешения;
+- first-run system-audio и microphone prompts принимаются стандартным
+  пользователем без admin credentials;
 - работа без dev environment;
 - чистая user account;
 - Gatekeeper;
@@ -137,6 +139,10 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 - realtime пишет PCM на диск;
 - внешняя сборка не проходит подпись/notarization/Gatekeeper;
 - лицензии поставки не соответствуют включённым компонентам.
+- хотя бы один обязательный runtime Mach-O требует macOS новее заявленной;
+- зависимость включает telemetry/metrics по умолчанию;
+- встроенные модели присутствуют, но clean-account runtime их не разрешает;
+- целевой no-admin пользователь не может запустить обязательный audio capture.
 
 ## Evidence bundle при завершении задачи
 
