@@ -35,6 +35,29 @@ class WebTests(unittest.TestCase):
         self.assertIn("Скачать DOCX", response.get_data(as_text=True))
         self.assertIn("progress-percent", response.get_data(as_text=True))
         self.assertIn("Ориентировочный прогресс", response.get_data(as_text=True))
+        self.assertIn("Открыть записи", response.get_data(as_text=True))
+        self.assertIn("Открыть транскрипции", response.get_data(as_text=True))
+
+    def test_open_folder_uses_finder_for_whitelisted_storage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            input_dir = Path(directory) / "input"
+            with (
+                patch.object(web, "INPUT_DIR", input_dir),
+                patch.object(web.subprocess, "run") as run_mock,
+            ):
+                response = self.client.post("/api/open-folder/input")
+
+        self.assertEqual(response.status_code, 200)
+        run_mock.assert_called_once_with(
+            ["open", str(input_dir)], check=True, capture_output=True, text=True
+        )
+
+    def test_open_folder_rejects_unknown_location(self):
+        with patch.object(web.subprocess, "run") as run_mock:
+            response = self.client.post("/api/open-folder/models")
+
+        self.assertEqual(response.status_code, 404)
+        run_mock.assert_not_called()
 
     def test_rejects_unsupported_file(self):
         response = self.client.post(

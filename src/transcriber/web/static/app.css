@@ -119,6 +119,16 @@ select, input[type="password"] { width: 100%; border: 0; outline: 0; color: var(
 .downloads { margin-left: auto; display: flex; gap: 9px; }
 .download { padding: 11px 14px; border-radius: 11px; color: white; background: var(--green); text-decoration: none; font-size: 14px; font-weight: 700; }
 .download.secondary { color: var(--green); background: white; border: 1px solid #bad4c8; }
+.storage-links { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 18px; }
+.storage-copy { display: flex; flex-direction: column; gap: 4px; }
+.storage-copy strong { font-size: 14px; }
+.storage-copy small { color: var(--muted); line-height: 1.35; }
+.storage-actions { display: flex; gap: 8px; }
+.storage-actions button { padding: 10px 12px; border: 1px solid #bad4c8; border-radius: 11px; color: var(--green); background: white; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: .2s ease; }
+.storage-actions button:hover:not(:disabled) { border-color: var(--green); background: var(--mint); }
+.storage-actions button:disabled { cursor: wait; opacity: .55; }
+.folder-message { grid-column: 1 / -1; color: var(--green); }
+.folder-message.error { color: #8a3023; }
 .hidden { display: none !important; }
 footer { padding: 20px 4px; display: flex; justify-content: center; align-items: center; gap: 10px; color: #7b8681; font-size: 13px; }
 .dot { width: 3px; height: 3px; border-radius: 50%; background: #9aa49f; }
@@ -135,4 +145,6 @@ footer { padding: 20px 4px; display: flex; justify-content: center; align-items:
   .speaker-option { flex-wrap: wrap; }
   .speaker-option select { width: 100%; margin: 4px 0 0 55px; }
   .downloads { width: 100%; margin-left: 54px; }
+  .storage-links { grid-template-columns: 1fr; }
+  .storage-actions { display: grid; grid-template-columns: 1fr 1fr; }
 }

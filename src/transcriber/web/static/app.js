@@ -12,6 +12,7 @@ const result = document.querySelector("#result");
 const diarization = document.querySelector("#diarization");
 const speakerCount = document.querySelector("#speaker-count");
 const recoverGaps = document.querySelector("#recover-gaps");
+const folderMessage = document.querySelector("#folder-message");
 
 const stageCaps = {
   uploading: 4,
@@ -206,4 +207,26 @@ form.addEventListener("submit", async (event) => {
   } catch (error) {
     showError(error.message);
   }
+});
+
+document.querySelectorAll("[data-open-folder]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    folderMessage.classList.add("hidden");
+    try {
+      const response = await fetch(`/api/open-folder/${button.dataset.openFolder}`, {
+        method: "POST",
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Не удалось открыть папку.");
+      folderMessage.textContent = data.message;
+      folderMessage.classList.remove("hidden", "error");
+    } catch (error) {
+      folderMessage.textContent = error.message;
+      folderMessage.classList.remove("hidden");
+      folderMessage.classList.add("error");
+    } finally {
+      button.disabled = false;
+    }
+  });
 });

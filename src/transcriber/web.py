@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import threading
 import uuid
 import webbrowser
@@ -247,6 +248,22 @@ def status(job_id: str):
 @app.get("/files/<path:filename>")
 def result_file(filename: str):
     return send_from_directory(OUTPUT_DIR, filename, as_attachment=True)
+
+
+@app.post("/api/open-folder/<folder_name>")
+def open_folder(folder_name: str):
+    folders = {"input": INPUT_DIR, "output": OUTPUT_DIR}
+    folder = folders.get(folder_name)
+    if folder is None:
+        return jsonify(error="Неизвестная папка."), 404
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            ["open", str(folder)], check=True, capture_output=True, text=True
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        return jsonify(error=f"Не удалось открыть папку: {error}"), 500
+    return jsonify(message="Папка открыта в Finder.")
 
 
 def build_parser() -> argparse.ArgumentParser:
