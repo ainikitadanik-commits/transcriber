@@ -7,9 +7,10 @@
 
 ## Решение тимлида
 
-Технический каркас приложения собран, но UI polish и финальная упаковка пока
-не должны маскировать фундаментальные дефекты. До UI допускается только работа,
-не обещающая готовый realtime. До передачи коллегам обязательны P0/P1 ниже.
+Технический каркас приложения собран. UI polish выполнен как отдельно
+согласованное исключение и честно показывает только доступный capture
+diagnostic, не маскируя отсутствие realtime ASR. До передачи коллегам
+обязательны остальные P0/P1 ниже.
 
 Жёсткий критерий аудитории: установка, первый запуск и выдача доступов должны
 выполняться стандартным пользователем без admin credentials. Инструкция
@@ -122,15 +123,16 @@ HTTP health response и детерминированный shutdown.
 разделение `denied`/`managed_denied`/device error и журналирование без
 чувствительных данных.
 
-### P1. UI обещает отсутствующий realtime ASR
+### Mitigated. UI обещает отсутствующий realtime ASR
 
 Реализованы capture и bounded RAM buffers, но не scheduler, live text, Pause,
-finalization и export. До реализации UI должен честно обозначать capture
-diagnostic или скрыть этот режим.
+finalization и export. С 2026-07-20 UI честно обозначает capture diagnostic,
+а Pause, live text и export — как planned. Функциональный realtime-блокер
+остаётся открытым, но UI больше не выдаёт его за готовую возможность.
 
 ## Порядок работ
 
-### Gate A — до UI polish
+### Gate A — до финального UI/release polish
 
 1. Отключить pyannote metrics до импорта и добавить regression/network check.
 2. Исправить resolver bundled GigaAM models и clean-account test.
@@ -140,7 +142,9 @@ diagnostic или скрыть этот режим.
 6. Ввести permission/error state model.
 7. Скрыть или честно переименовать незавершённый realtime.
 
-Только после Gate A выполняется запрошенный UI polish.
+Ограниченный visual polish файлового сценария и честного capture diagnostic
+выполнен по исключению 2026-07-20. Дальнейший UI, связанный с полноценным
+realtime, и release polish выполняются только после Gate A.
 
 ### Gate B — до передачи коллегам
 

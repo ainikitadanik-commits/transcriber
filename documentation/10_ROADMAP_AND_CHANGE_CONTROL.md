@@ -55,6 +55,11 @@ UI polish начинается после закрытия privacy, model-resolu
 architecture и lifecycle-блокеров. Визуальная доработка не является способом
 закрыть недоступный permission flow.
 
+Исключение, одобренное пользователем 2026-07-20: ограниченный visual polish
+файлового сценария и честного capture diagnostic разрешён до полного Gate A.
+Он не меняет backend/API, не активирует Pause/live ASR/export и не закрывает
+ни один product readiness blocker.
+
 ## Этап 2. Near-real-time ASR MVP
 
 Статус: следующий крупный функциональный этап.

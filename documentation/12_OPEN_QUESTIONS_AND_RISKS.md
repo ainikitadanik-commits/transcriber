@@ -42,7 +42,7 @@
 | R-007 | P1 | Product build поддерживает меньше контейнеров, чем README | минимальный FFmpeg | нужна artifact format matrix |
 | R-008 | P2 | Общий singleton job ограничивает надёжность | запрет второй задачи | state теряется при restart |
 | R-009 | P2 | Общая output-папка создаёт коллизии имён | job inputs изолированы | outputs не namespaced |
-| R-010 | P1 | Документация и UI обещают больше, чем код | канонический комплект и gates | нужна синхронизация перед release |
+| R-010 | P2 | Документация и UI обещают больше, чем код | realtime переименован в capture diagnostic; Pause/live text/export явно помечены как planned | повторять сверку перед каждым release |
 | R-011 | P1 | Лицензии меняются вместе с dependency graph | auto collection + ledger | пересобирать каждый релиз |
 | R-012 | P2 | Логи/inputs растут без ограничений | Finder access | нет retention policy |
 | R-013 | P1 | Качество оценивается по нерепрезентативному примеру | требование control set | набора пока нет |

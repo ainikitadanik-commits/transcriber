@@ -33,6 +33,7 @@
 | FR-UI-001 | Давать файловый сценарий без Terminal | MUST | CURRENT |
 | FR-UI-002 | Показывать этап, ориентировочный прогресс и итоговый статус | MUST | CURRENT |
 | FR-UI-003 | Позволять скачать результаты и открыть локальные папки | MUST | CURRENT |
+| FR-UI-004 | Длинное имя файла не расширяет карточку; extension видно, полное имя доступно через tooltip и accessible name | MUST | CURRENT |
 | FR-RT-001 | Захватывать системный звук и микрофон без виртуального драйвера | MUST | BLOCKED: ScreenCaptureKit получает `userDeclined` у целевого no-admin пользователя |
 | FR-RT-002 | Передавать два PCM-потока только через локальные pipes | MUST | CURRENT |
 | FR-RT-003 | Распознавать короткие перекрывающиеся окна и обновлять живой текст | MUST | PLANNED |
@@ -56,6 +57,8 @@
 | NFR-TEST-001 | Изменение поведения сопровождается тестом или зафиксированной причиной его отсутствия | MUST | PROCESS |
 | NFR-RELSE-001 | Внешний релиз подписан Developer ID и нотариализован | MUST | PLANNED |
 | NFR-LIC-001 | В поставке присутствуют лицензии фактически включённых компонентов | MUST | BLOCKED: в artifact не найдены лицензии `python-docx` и `transformers` |
+| NFR-UI-001 | UI не создаёт horizontal overflow на ширинах 480–1440 px | MUST | CURRENT |
+| NFR-A11Y-001 | Tabs и основные controls доступны с клавиатуры и имеют видимый focus | MUST | CURRENT |
 
 ## Поддерживаемые входы
 

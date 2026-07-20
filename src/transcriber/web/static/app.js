@@ -2,6 +2,7 @@ const form = document.querySelector("#form");
 const partsList = document.querySelector("#parts-list");
 const addPart = document.querySelector("#add-part");
 const submit = document.querySelector("#submit");
+const submitLabel = document.querySelector(".submit-label");
 const statusBox = document.querySelector("#status");
 const statusTitle = document.querySelector("#status-title");
 const statusMessage = document.querySelector("#status-message");
@@ -19,6 +20,7 @@ const liveModePanel = document.querySelector("#live-mode-panel");
 const liveState = document.querySelector("#live-state");
 const liveTimer = document.querySelector("#live-timer");
 const liveStart = document.querySelector("#live-start");
+const livePause = document.querySelector("#live-pause");
 const liveStop = document.querySelector("#live-stop");
 const liveNotice = document.querySelector("#live-notice");
 const systemAudioState = document.querySelector("#system-audio-state");
@@ -28,15 +30,31 @@ function selectMode(mode) {
   const liveMode = mode === "live";
   fileModePanel.classList.toggle("hidden", liveMode);
   liveModePanel.classList.toggle("hidden", !liveMode);
+  fileModePanel.hidden = liveMode;
+  liveModePanel.hidden = !liveMode;
   modeButtons.forEach((button) => {
     const active = button.dataset.mode === mode;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
   });
 }
 
-modeButtons.forEach((button) => {
+modeButtons.forEach((button, index) => {
   button.addEventListener("click", () => selectMode(button.dataset.mode));
+  button.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? modeButtons.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + modeButtons.length)
+          % modeButtons.length;
+    const nextButton = modeButtons[nextIndex];
+    selectMode(nextButton.dataset.mode);
+    nextButton.focus();
+  });
 });
 
 function formatDuration(totalSeconds) {
@@ -46,28 +64,43 @@ function formatDuration(totalSeconds) {
   return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
 }
 
+function setTextIfChanged(element, text) {
+  if (element.textContent !== text) {
+    element.textContent = text;
+  }
+}
+
 function renderRealtime(state) {
   const active = ["starting", "recording", "stopping"].includes(state.status);
-  liveState.textContent = {
-    idle: "Готово",
-    starting: "Разрешения",
-    recording: "Идёт запись",
+  const canStop = active || state.status === "error";
+  setTextIfChanged(liveState, {
+    idle: "Захват готов",
+    starting: "Запрашиваем доступ",
+    recording: "Идёт захват",
     stopping: "Завершаем",
     error: "Ошибка",
-  }[state.status] || "Проверяем";
+  }[state.status] || "Проверяем");
+  liveState.classList.toggle("planned", state.status === "idle");
   liveState.classList.toggle("recording", state.status === "recording");
   liveState.classList.toggle("error", state.status === "error");
+  liveModePanel.classList.toggle("is-recording", state.status === "recording");
   liveTimer.textContent = formatDuration(state.elapsed_seconds || 0);
   liveTimer.setAttribute("datetime", `PT${state.elapsed_seconds || 0}S`);
-  liveNotice.textContent = state.available
+  setTextIfChanged(liveNotice, state.available
     ? state.message
-    : "Помощник захвата не собран. Перезапустите транскрибатор после обновления.";
-  systemAudioState.textContent = `Системный звук: ${state.system_audio ? "получаем" : "ожидаем"}`;
-  microphoneState.textContent = `Микрофон: ${state.microphone ? "получаем" : "ожидаем"}`;
+    : "Помощник захвата не собран. Перезапустите транскрибатор после обновления.");
+  const waitingLabel = state.status === "starting"
+    ? "проверяем"
+    : state.status === "error"
+      ? "ошибка"
+      : "ожидаем";
+  setTextIfChanged(systemAudioState, `Системный звук: ${state.system_audio ? "есть звук" : waitingLabel}`);
+  setTextIfChanged(microphoneState, `Микрофон: ${state.microphone ? "есть звук" : waitingLabel}`);
   systemAudioState.classList.toggle("active", Boolean(state.system_audio));
   microphoneState.classList.toggle("active", Boolean(state.microphone));
   liveStart.disabled = !state.available || active;
-  liveStop.disabled = !active;
+  livePause.disabled = true;
+  liveStop.disabled = !canStop;
 }
 
 async function refreshRealtimeStatus() {
@@ -132,6 +165,15 @@ let displayedProgress = 0;
 let reportedProgress = 0;
 let progressCap = 0;
 let progressActive = false;
+let formBusy = false;
+
+function setSubmitLoading(loading) {
+  formBusy = loading;
+  submit.classList.toggle("loading", loading);
+  submitLabel.textContent = loading ? "Транскрибируем…" : "Начать транскрибацию";
+  submit.setAttribute("aria-busy", String(loading));
+  submit.disabled = loading || selectedFiles().length === 0;
+}
 
 function renderProgress() {
   const rounded = Math.min(100, Math.round(displayedProgress));
@@ -189,9 +231,46 @@ function refreshParts() {
   const rows = [...partsList.querySelectorAll(".part-row")];
   rows.forEach((row, index) => {
     row.querySelector(".part-number").textContent = `Часть ${index + 1}`;
-    row.querySelector(".remove-part").classList.toggle("hidden", rows.length === 1);
+    const hasFile = row.querySelector(".dropzone").classList.contains("has-file");
+    row.querySelector(".remove-part").classList.toggle(
+      "hidden",
+      rows.length === 1 && !hasFile,
+    );
   });
-  submit.disabled = selectedFiles().length === 0;
+  submit.disabled = formBusy || selectedFiles().length === 0;
+}
+
+function splitFilename(filename, maxBaseLength = 46) {
+  const lastDot = filename.lastIndexOf(".");
+  const extension = lastDot > 0 ? filename.slice(lastDot) : "";
+  const base = lastDot > 0 ? filename.slice(0, lastDot) : filename;
+  const baseCharacters = Array.from(base);
+  if (baseCharacters.length <= maxBaseLength) {
+    return { prefix: base, tail: extension };
+  }
+  const rightLength = Math.min(14, Math.max(8, Math.floor(maxBaseLength * 0.28)));
+  const leftLength = Math.max(16, maxBaseLength - rightLength);
+  return {
+    prefix: baseCharacters.slice(0, leftLength).join(""),
+    tail: `…${baseCharacters.slice(-rightLength).join("")}${extension}`,
+  };
+}
+
+function renderFilename(title, filename) {
+  const { prefix, tail } = splitFilename(filename);
+  title.replaceChildren();
+  title.title = filename;
+  title.setAttribute("aria-label", filename);
+  const prefixNode = document.createElement("span");
+  prefixNode.className = "file-name-prefix";
+  prefixNode.textContent = prefix;
+  title.appendChild(prefixNode);
+  if (tail) {
+    const tailNode = document.createElement("span");
+    tailNode.className = "file-name-tail";
+    tailNode.textContent = tail;
+    title.appendChild(tailNode);
+  }
 }
 
 function selectFile(row, file) {
@@ -200,11 +279,29 @@ function selectFile(row, file) {
   const transfer = new DataTransfer();
   transfer.items.add(file);
   input.files = transfer.files;
-  row.querySelector(".dropzone").classList.add("has-file");
-  row.querySelector(".drop-title").textContent = file.name;
+  const dropzone = row.querySelector(".dropzone");
+  const title = row.querySelector(".drop-title");
+  dropzone.classList.add("has-file");
+  dropzone.setAttribute("aria-label", `Выбран файл: ${file.name}`);
+  renderFilename(title, file.name);
   row.querySelector(".drop-note").textContent = `${(file.size / 1024 / 1024).toFixed(1)} МБ`;
+  row.querySelector(".file-hint").textContent = "Нажмите, чтобы заменить файл";
   result.classList.add("hidden");
   refreshParts();
+}
+
+function resetPart(row) {
+  const input = row.querySelector(".part-input");
+  const dropzone = row.querySelector(".dropzone");
+  const title = row.querySelector(".drop-title");
+  input.value = "";
+  dropzone.classList.remove("has-file", "dragging");
+  dropzone.removeAttribute("aria-label");
+  title.removeAttribute("title");
+  title.removeAttribute("aria-label");
+  title.textContent = "Перетащите запись сюда";
+  row.querySelector(".drop-note").textContent = "или нажмите, чтобы выбрать файл";
+  row.querySelector(".file-hint").textContent = "WEBM, MP4, MP3, M4A и другие аудиоформаты";
 }
 
 function bindPart(row) {
@@ -221,7 +318,11 @@ function bindPart(row) {
   }));
   dropzone.addEventListener("drop", (event) => selectFile(row, event.dataTransfer.files[0]));
   row.querySelector(".remove-part").addEventListener("click", () => {
-    row.remove();
+    if (partsList.querySelectorAll(".part-row").length === 1) {
+      resetPart(row);
+    } else {
+      row.remove();
+    }
     refreshParts();
   });
 }
@@ -233,12 +334,16 @@ function createPart() {
     <label class="dropzone">
       <input class="part-input" name="files" type="file" accept=".webm,.mp4,.wav,.mp3,.m4a,.flac,.ogg,.aac">
       <span class="part-number"></span>
-      <span class="upload-icon" aria-hidden="true">↑</span>
-      <strong class="drop-title">Выберите следующую часть</strong>
-      <span class="drop-note">или перетащите файл сюда</span>
-      <small>Таймкоды продолжатся после предыдущей части</small>
+      <span class="upload-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5V20h14v-4.5"></path></svg>
+      </span>
+      <span class="file-card__info">
+        <strong class="drop-title">Выберите следующую часть</strong>
+        <span class="drop-note">или перетащите файл сюда</span>
+        <small class="file-hint">Таймкоды продолжатся после предыдущей части</small>
+      </span>
     </label>
-    <button class="remove-part" type="button" aria-label="Удалить часть">×</button>`;
+    <button class="remove-part" type="button" aria-label="Удалить файл" title="Удалить файл">×</button>`;
   partsList.appendChild(row);
   bindPart(row);
   refreshParts();
@@ -255,14 +360,14 @@ function showError(message) {
   statusBox.classList.add("error");
   statusTitle.textContent = "Не удалось обработать файл";
   statusMessage.textContent = message;
-  submit.disabled = false;
+  setSubmitLoading(false);
 }
 
 async function poll(jobId) {
   const response = await fetch(`/api/status/${jobId}`);
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Не удалось получить статус.");
-  statusMessage.textContent = data.message;
+  setTextIfChanged(statusMessage, data.message);
   updateProgress(data.progress, data.stage);
   if (data.status === "done") {
     statusBox.classList.add("hidden");
@@ -273,7 +378,7 @@ async function poll(jobId) {
     document.querySelector("#txt-link").href = `/files/${encodeURIComponent(data.txt_name)}`;
     document.querySelector("#docx-link").href = `/files/${encodeURIComponent(data.docx_name)}`;
     document.querySelector("#json-link").href = `/files/${encodeURIComponent(data.json_name)}`;
-    submit.disabled = false;
+    setSubmitLoading(false);
     return;
   }
   if (data.status === "error") {
@@ -290,7 +395,7 @@ form.addEventListener("submit", async (event) => {
     showError("Добавьте хотя бы одну часть встречи.");
     return;
   }
-  submit.disabled = true;
+  setSubmitLoading(true);
   resetProgress();
   result.classList.add("hidden");
   statusBox.classList.remove("hidden", "error");

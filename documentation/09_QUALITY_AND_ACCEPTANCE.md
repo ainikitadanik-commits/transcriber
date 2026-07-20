@@ -69,6 +69,15 @@ mock не подтверждает пользовательский резуль
 | release | все применимые уровни |
 | документация без кода | link/consistency review + source verification |
 
+Для UI polish browser/manual smoke включает 1440, 1280, 1024, 820, 640 и
+480 px, оба mode panels, keyboard tabs/focus, empty/short/150+ filename,
+multi-part, loading/error/done и фактические capture states. Для каждого
+viewport проверяется `document.scrollWidth === document.clientWidth`.
+
+Playwright screenshots хранятся в `output/playwright/` как evidence и не
+подменяют функциональные тесты. Pause/live ASR/realtime export указываются
+`N/A`, пока соответствующий backend не реализован.
+
 ## Автоматический baseline
 
 Текущий suite расположен в `tests/` и покрывает:

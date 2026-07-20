@@ -35,6 +35,7 @@
 | [12_OPEN_QUESTIONS_AND_RISKS.md](12_OPEN_QUESTIONS_AND_RISKS.md) | незакрытые решения и контролируемые риски | при планировании и выпуске |
 | [13_DEVELOPMENT_PLAYBOOK.md](13_DEVELOPMENT_PLAYBOOK.md) | компактный регламент каждой новой задачи | в начале каждого цикла разработки |
 | [14_PRODUCT_READINESS_HEALTH_CHECK.md](14_PRODUCT_READINESS_HEALTH_CHECK.md) | фактический baseline product `.app` и обязательный порядок стабилизации | перед UI polish и финальной упаковкой |
+| [15_UI_POLISH_SPECIFICATION.md](15_UI_POLISH_SPECIFICATION.md) | визуальная система, responsive, accessibility и честная граница realtime UI | перед изменением HTML/CSS/JS |
 
 ## Иерархия решений
 
@@ -75,7 +76,7 @@
 
 ### Realtime
 
-Прочитать: 01 → 03 → 05 → 06 → 07 → 09 → 11 → 12 → 14 → 13.
+Прочитать: 01 → 03 → 05 → 06 → 07 → 09 → 11 → 12 → 14 → 15 → 13.
 
 ### Упаковка или релиз
 
