@@ -44,22 +44,23 @@ cd "$VENDOR"
   --enable-avformat \
   --enable-avfilter \
   --enable-swresample \
-  --enable-protocol=file \
+  --enable-protocol=file,pipe \
   --enable-demuxer=matroska,mov,mp3,wav,flac,ogg,aac \
   --enable-decoder=opus,vorbis,aac,alac,mp3,mp3float,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le,flac \
   --enable-filter=aresample,aformat,pan \
   --enable-encoder=pcm_s16le \
-  --enable-muxer=wav
+  --enable-muxer=wav,pcm_s16le
 
 /usr/bin/make -j4 ffmpeg
-/usr/bin/ditto --noextattr --noqtn --norsrc "$VENDOR/ffmpeg" "$OUTPUT"
 /bin/chmod +x "$OUTPUT"
 
-if ! "$OUTPUT" -L 2>&1 | /usr/bin/grep -q "GNU Lesser General Public License"; then
+LICENSE_TEXT=$("$OUTPUT" -L 2>&1)
+if [[ "$LICENSE_TEXT" != *"GNU Lesser General Public"* ]]; then
   echo "Ошибка: собранный FFmpeg не сообщил лицензию LGPL." >&2
   exit 1
 fi
-if "$OUTPUT" -version 2>&1 | /usr/bin/grep -q -- "--enable-gpl"; then
+VERSION_TEXT=$("$OUTPUT" -version 2>&1)
+if [[ "$VERSION_TEXT" == *"--enable-gpl"* ]]; then
   echo "Ошибка: в конфигурации FFmpeg неожиданно включён GPL-код." >&2
   exit 1
 fi

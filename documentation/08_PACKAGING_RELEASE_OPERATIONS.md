@@ -48,6 +48,8 @@
 - GigaAM dependency остаётся закреплённой на конкретный commit;
 - runtime включает web templates/static и ресурсы python-docx;
 - product build использует специально собранный FFmpeg;
+- product FFmpeg поддерживает локальные протоколы `file` и `pipe`, а также
+  muxer `pcm_s16le`, необходимый GigaAM для передачи raw PCM через stdout;
 - модели GigaAM проверяются до копирования;
 - pyannote models не встраиваются и получаются пользователем;
 - license bundle соответствует фактическому runtime;
