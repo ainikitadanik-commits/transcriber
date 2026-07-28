@@ -1,13 +1,15 @@
 # Архитектура системы
 
 Статус: каноническая архитектура
-Актуально на: 2026-07-20
+Актуально на: 2026-07-28
 
 ## Контекст
 
-Приложение выполняется целиком на одном Mac. Внешняя сеть допустима только на
-этапе получения разрешённых моделей pyannote. Обработка записей и текста
-находится внутри локальной границы доверия.
+Приложение выполняется целиком на одном Mac. Базовая файловая транскрибация
+использует bundled GigaAM offline и не требует pyannote models, HF token или
+сети. Внешняя сеть допустима только для явно включённой diarization:
+пользователь принимает условия gated pyannote-модели и временно вводит Read
+token. Обработка записей и текста находится внутри локальной границы доверия.
 
 ## Компоненты
 
@@ -19,7 +21,9 @@
 | CLI | `transcriber.cli` | технический файловый сценарий |
 | pipeline | `transcriber.core` | валидация, FFmpeg, ASR, recovery, diarization, экспорт |
 | model/storage layer | `transcriber.models` | пути данных, кэши и получение моделей |
-| realtime manager | `transcriber.realtime` | дочерний capture-процесс, события и PCM-буферы |
+| realtime capture | `transcriber.realtime` | дочерний capture-процесс, события и PCM-буферы |
+| realtime ASR | `transcriber.realtime_asr`, `transcriber.gigaam_realtime` | окна, overlap/dedup и локальный GigaAM adapter |
+| realtime service | `transcriber.realtime_service` | lifecycle, live state, finalization и export |
 | media layer | FFmpeg 7.1 | локальная нормализация контейнеров и PCM |
 | ASR | GigaAM | long-form распознавание |
 | VAD/diarization | pyannote | сегментация речи и условные спикеры |
@@ -58,17 +62,19 @@
 ## Realtime-поток
 
 ```text
-ScreenCaptureKit system audio ---> resample mono 16 kHz ---> pipe ---> PCMBuffer
-AVFoundation microphone ---------> resample mono 16 kHz ---> pipe ---> PCMBuffer
-                                                                |
-                                               planned window scheduler
-                                                                |
-                                                       GigaAM short ASR
-                                                                |
-                                                     live transcript/export
+Core Audio Tap system audio ---> resample mono 16 kHz ---> pipe ---> PCMBuffer
+AVAudioEngine microphone ------> resample mono 16 kHz ---> pipe ---> PCMBuffer
+                                                               |
+                                             bounded window scheduler
+                                                               |
+                                                   GigaAM short ASR
+                                                               |
+                                                live state + local export
 ```
 
-Текущая граница реализации заканчивается на `PCMBuffer`.
+Весь внутренний контур реализован и покрыт автоматическими тестами. Его
+product-ready статус остаётся заблокированным до signed TCC dual-source
+acceptance на чистом корпоративном no-admin Mac.
 
 ## Хранилище
 
@@ -83,7 +89,7 @@ AVFoundation microphone ---------> resample mono 16 kHz ---> pipe ---> PCMBuffer
 | `input/` | сохранённые пользовательские загрузки | пользователь удаляет вручную |
 | `output/` | TXT, JSON, DOCX | пользователь удаляет вручную |
 | `models/gigaam/` | локальные веса при source-установке | сохраняются между запусками |
-| `models/huggingface/` | pyannote cache | сохраняется между запусками |
+| `models/huggingface/` | optional gated pyannote cache для diarization | сохраняется между запусками |
 | `logs/` | локальные журналы | политика ротации пока открыта |
 
 В продуктовой `.app` веса GigaAM находятся также внутри Resources. Путь
@@ -106,8 +112,8 @@ AVFoundation microphone ---------> resample mono 16 kHz ---> pipe ---> PCMBuffer
 - нет постоянного каталога задач и восстановления незавершённой обработки;
 - endpoint скачивания опирается на имя файла в общей `output/`;
 - нет ротации логов;
-- realtime manager ещё не имеет оконного scheduler и состояния итогового
-  документа;
+- live signed Core Audio Tap + microphone TCC acceptance ещё не выполнен;
+- realtime не прошёл 30-минутный packaged сценарий;
 - проверки качества речи в основном требуют реальных аудиофикстур.
 
 Эти ограничения не являются разрешением на случайную переработку. Их изменение

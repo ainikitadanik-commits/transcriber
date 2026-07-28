@@ -1,0 +1,5 @@
+Package: sentencepiece
+License expression from the bundled wheel metadata: Apache-2.0
+
+The complete Apache License 2.0 text is included in this distribution at:
+../transformers/LICENSE

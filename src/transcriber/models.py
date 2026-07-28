@@ -19,8 +19,10 @@ def data_dir() -> Path:
 def configure_storage() -> Path:
     root = data_dir()
     os.environ["HF_HOME"] = str(root / "models" / "huggingface")
-    os.environ["TRANSCRIBER_GIGAAM_MODELS_DIR"] = str(root / "models" / "gigaam")
+    if not os.environ.get("TRANSCRIBER_GIGAAM_MODELS_DIR"):
+        os.environ["TRANSCRIBER_GIGAAM_MODELS_DIR"] = str(root / "models" / "gigaam")
     os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+    os.environ["PYANNOTE_METRICS_ENABLED"] = "0"
     for directory in (root / "input", root / "output", root / "logs"):
         directory.mkdir(parents=True, exist_ok=True)
     return root

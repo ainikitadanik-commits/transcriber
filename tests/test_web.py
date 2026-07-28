@@ -40,13 +40,22 @@ class WebTests(unittest.TestCase):
         self.assertIn("Открыть транскрипции", html)
         self.assertIn("Из файла", html)
         self.assertIn("Рилтайм", html)
-        self.assertIn("Захват звука встречи", html)
-        self.assertIn("Распознавание в реальном времени пока планируется", html)
-        self.assertIn("Живой текст · планируется", html)
+        self.assertIn("Транскрибация в реальном времени", html)
+        self.assertIn("распознаются локально", html)
+        self.assertIn("Живой текст", html)
+        self.assertIn("Начать встречу", html)
+        self.assertIn("<small>Скоро</small>", html)
+        self.assertNotIn("пока планируется", html)
+        self.assertNotIn("Только захват", html)
         self.assertIn('id="live-start"', html)
         self.assertIn('id="live-pause"', html)
         self.assertIn('id="live-stop"', html)
         self.assertIn('id="live-timer"', html)
+        self.assertIn('id="live-transcript-content"', html)
+        self.assertIn('id="live-downloads"', html)
+        self.assertIn('id="live-txt-link"', html)
+        self.assertIn('id="live-json-link"', html)
+        self.assertIn('id="live-docx-link"', html)
         self.assertIn("Системный звук: ожидаем", html)
         self.assertIn("Микрофон: ожидаем", html)
         self.assertIn("PCM 16 кГц", html)
@@ -90,12 +99,23 @@ class WebTests(unittest.TestCase):
         self.assertIn('title.title = filename', javascript)
         self.assertIn('submitLabel.textContent = loading ? "Транскрибируем…"', javascript)
         self.assertIn('livePause.disabled = true', javascript)
+        self.assertIn("function renderRealtimeTranscript", javascript)
+        self.assertIn("state.segments", javascript)
+        self.assertIn("state.provisional", javascript)
+        self.assertIn("realtimeSourceLabels", javascript)
+        self.assertIn("liveDownloads.classList.toggle", javascript)
+        self.assertIn("encodeURIComponent(name)", javascript)
 
     def test_realtime_status_exposes_capture_state(self):
         with patch.object(
-            web.capture_manager,
+            web.realtime_service,
             "snapshot",
-            return_value={"status": "idle", "available": True},
+            return_value={
+                "status": "idle",
+                "available": True,
+                "asr_status": "idle",
+                "segments": [],
+            },
         ):
             response = self.client.get("/api/realtime/status")
 
@@ -105,27 +125,35 @@ class WebTests(unittest.TestCase):
     def test_realtime_start_and_stop_use_local_capture_manager(self):
         with (
             patch.object(
-                web.capture_manager,
+                web.realtime_service,
                 "start",
-                return_value={"status": "starting", "available": True},
+                return_value={
+                    "status": "starting",
+                    "available": True,
+                    "asr_status": "loading",
+                },
             ) as start_mock,
             patch.object(
-                web.capture_manager,
+                web.realtime_service,
                 "stop",
-                return_value={"status": "idle", "available": True},
+                return_value={
+                    "status": "stopping",
+                    "available": True,
+                    "asr_status": "finalizing",
+                },
             ) as stop_mock,
         ):
             start_response = self.client.post("/api/realtime/start")
             stop_response = self.client.post("/api/realtime/stop")
 
         self.assertEqual(start_response.status_code, 202)
-        self.assertEqual(stop_response.status_code, 200)
+        self.assertEqual(stop_response.status_code, 202)
         start_mock.assert_called_once_with()
         stop_mock.assert_called_once_with()
 
     def test_realtime_start_returns_actionable_error(self):
         with patch.object(
-            web.capture_manager,
+            web.realtime_service,
             "start",
             side_effect=RuntimeError("Помощник захвата не собран."),
         ):

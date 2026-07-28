@@ -10,12 +10,38 @@ RUNTIME="$DIST_ROOT/transcriber-runtime"
 APP="$DIST_ROOT/Транскрибатор.app"
 CONTENTS="$APP/Contents"
 RESOURCES="$CONTENTS/Resources"
-PYTHON="$ROOT/.venv/bin/python"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
-SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk"
+SDK="${SDKROOT:-$(xcrun --show-sdk-path)}"
+MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
+RELEASE_BUILD="${RELEASE_BUILD:-0}"
+RELEASE_LOCK="$ROOT/packaging/requirements-release.lock"
+RELEASE_PYTHON_FRAMEWORK="${RELEASE_PYTHON_FRAMEWORK:-}"
+
+if [[ -n "$RELEASE_PYTHON_FRAMEWORK" ]]; then
+  export DYLD_FRAMEWORK_PATH="${RELEASE_PYTHON_FRAMEWORK:h}"
+  export DYLD_LIBRARY_PATH="$RELEASE_PYTHON_FRAMEWORK/Versions/3.12/lib"
+fi
+
+if [[ "$RELEASE_BUILD" == "1" ]]; then
+  PYTHON="${RELEASE_PYTHON:-$BUILD_ROOT/release-venv/bin/python}"
+  if [[ ! -x "$PYTHON" ]]; then
+    echo "Release Python not found: $PYTHON" >&2
+    echo "Run scripts/prepare_release_environment.sh first." >&2
+    exit 1
+  fi
+  "$ROOT/scripts/audit_release_dependencies.sh" "$PYTHON" "$RELEASE_LOCK" "-"
+else
+  PYTHON="${TRANSCRIBER_BUILD_PYTHON:-$ROOT/.venv/bin/python}"
+fi
 
 export PYINSTALLER_CONFIG_DIR="$BUILD_ROOT/pyinstaller-cache"
 export MPLCONFIGDIR="$BUILD_ROOT/matplotlib-cache"
+export MACOSX_DEPLOYMENT_TARGET
+
+if [[ "$RELEASE_BUILD" == "1" && "$SIGN_IDENTITY" == "-" ]]; then
+  echo "Release build requires a real Developer ID Application identity." >&2
+  exit 1
+fi
 
 if [[ "${REBUILD_RUNTIME:-0}" == "1" || ! -x "$RUNTIME/transcriber-runtime" ]]; then
   rm -rf "$RUNTIME"
@@ -32,6 +58,8 @@ if [[ "${REBUILD_RUNTIME:-0}" == "1" || ! -x "$RUNTIME/transcriber-runtime" ]]; 
     --collect-submodules pyannote.audio \
     --collect-data pyannote.audio \
     --collect-data docx \
+    --copy-metadata python-docx \
+    --copy-metadata transformers \
     --collect-submodules scipy._external.array_api_compat \
     --add-data "$ROOT/src/transcriber/web/templates:transcriber/web/templates" \
     --add-data "$ROOT/src/transcriber/web/static:transcriber/web/static" \
@@ -76,6 +104,7 @@ if [[ ! -x "$FFMPEG" ]]; then
   echo "Сначала выполните scripts/build_ffmpeg_lgpl.sh." >&2
   exit 1
 fi
+"$ROOT/scripts/audit_ffmpeg.sh" "$FFMPEG"
 /usr/bin/ditto --noextattr --noqtn --norsrc "$FFMPEG" "$RESOURCES/bin/ffmpeg"
 /bin/chmod +x "$RESOURCES/bin/ffmpeg"
 
@@ -102,6 +131,20 @@ find "$RUNTIME/_internal" -type f \
       "$license_file" "$destination"
   done
 
+"$ROOT/scripts/audit_licenses.sh" \
+  "$RUNTIME" \
+  "$RESOURCES/Лицензии"
+
+if [[ "$RELEASE_BUILD" == "1" ]]; then
+  /usr/bin/ditto --noextattr --noqtn --norsrc \
+    "$RELEASE_LOCK" \
+    "$RESOURCES/Лицензии/requirements-release.lock"
+  "$ROOT/scripts/audit_release_dependencies.sh" \
+    "$PYTHON" \
+    "$RELEASE_LOCK" \
+    "$RESOURCES/Лицензии/DEPENDENCY-INVENTORY.txt"
+fi
+
 mkdir -p "$BUILD_ROOT/swift-module-cache"
 xcrun swiftc \
   -parse-as-library \
@@ -111,24 +154,23 @@ xcrun swiftc \
   -target arm64-apple-macos15.0 \
   -framework AppKit \
   -framework AVFoundation \
+  -framework CoreAudio \
   -framework CoreMedia \
-  -framework ScreenCaptureKit \
   "$ROOT/native/realtime_capture.swift" \
   -o "$CONTENTS/MacOS/Transcriber"
 
 /usr/bin/plutil -lint "$CONTENTS/Info.plist"
 
-SIGN_ARGS=(--force --options runtime --sign "$SIGN_IDENTITY")
-if [[ "$SIGN_IDENTITY" != "-" ]]; then
-  SIGN_ARGS+=(--timestamp)
-fi
+MACHO_INVENTORY_OUTPUT="$RESOURCES/Лицензии/MACHO-INVENTORY.tsv" \
+  "$ROOT/scripts/audit_macho.sh" "$APP" "$MACOSX_DEPLOYMENT_TARGET"
 
-/usr/bin/codesign "${SIGN_ARGS[@]}" --deep "$APP"
-/usr/bin/codesign \
-  "${SIGN_ARGS[@]}" \
-  --entitlements "$ROOT/packaging/app/Transcriber.entitlements" \
-  "$APP"
+"$ROOT/scripts/sign_app_bundle.sh" \
+  "$APP" \
+  "$SIGN_IDENTITY" \
+  "$ROOT/packaging/app/Transcriber.entitlements"
 
-/usr/bin/codesign --verify --deep --strict --verbose=2 "$APP"
+"$ROOT/scripts/audit_signatures.sh" \
+  "$APP" \
+  "$RELEASE_BUILD"
 
 echo "$APP"

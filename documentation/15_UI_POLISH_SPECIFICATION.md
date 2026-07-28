@@ -139,7 +139,8 @@ TypeScript и отдельный frontend linter в текущем vanilla front
 - Pause остаётся disabled, live text явно помечен `планируется`;
 - browser console: ошибок и предупреждений нет;
 - `node --check`: PASS;
-- Python suite: 38/38 PASS;
+- Python suite на момент UI-проверки: 38/38 PASS; актуальный интеграционный
+  release gate — 72/72 PASS, см. `14_PRODUCT_READINESS_HEALTH_CHECK.md`;
 - screenshots: `output/playwright/ui-file-1440.png` и
   `output/playwright/ui-realtime-1440.png`.
 

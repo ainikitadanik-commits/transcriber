@@ -154,6 +154,12 @@ Audio Tap с исключением собственного процесса. S
 `NSAudioCaptureUsageDescription` штатным пользовательским prompt без захвата
 экрана. Microphone захватывается отдельным AVFoundation/Core Audio контуром.
 
+Состояние реализации 2026-07-28: внутренний candidate использует private Core
+Audio Tap и отдельный AVAudioEngine microphone-контур; ScreenCaptureKit удалён
+из capture path. Автоматические core/API/UI тесты проходят. Это не меняет
+статус ADR: live signed TCC dual-source evidence на целевом corporate no-admin
+Mac отсутствует.
+
 Последствия: меняются lifecycle двух источников, permission/error state,
 создание и cleanup tap/aggregate device, реакция на смену output device.
 Стабильная Developer ID identity обязательна для проверки continuity между

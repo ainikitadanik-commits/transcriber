@@ -12,6 +12,35 @@ from transcriber.realtime import (
 
 
 class RealtimeTests(unittest.TestCase):
+    def test_native_capture_sources_are_independent_and_structured(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "native"
+            / "realtime_capture.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("import CoreAudio", source)
+        self.assertIn("AudioHardwareCreateProcessTap", source)
+        self.assertIn("AudioHardwareDestroyProcessTap", source)
+        self.assertIn("final class MicrophoneCapture", source)
+        self.assertIn("AVAudioEngine()", source)
+        self.assertNotIn("ScreenCaptureKit", source)
+        self.assertIn("GET /api/health HTTP/1.0", source)
+        self.assertIn('environment["TRANSCRIBER_BUILD_ID"]', source)
+        self.assertIn('environment["TRANSCRIBER_INSTANCE_ID"]', source)
+        self.assertIn('appendingPathComponent("runtime-instance.json")', source)
+        self.assertIn('expectedPID.map { payload?["pid"]', source)
+        self.assertIn("removeRuntimeMarker(ifMatching:", source)
+        self.assertNotIn('text.contains("\\"audio_format\\"")', source)
+        for field in (
+            '"source"',
+            '"error_domain"',
+            '"error_code"',
+            '"native_code"',
+            '"state"',
+        ):
+            self.assertIn(field, source)
+
     def test_pcm_buffer_is_bounded_and_drains_in_order(self):
         buffer = PCMBuffer(limit=6)
         buffer.append(b"abcd")

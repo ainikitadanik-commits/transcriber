@@ -1,7 +1,7 @@
 # Область и требования
 
 Статус: нормативная спецификация
-Актуально на: 2026-07-20
+Актуально на: 2026-07-28
 
 ## Обозначения
 
@@ -34,10 +34,10 @@
 | FR-UI-002 | Показывать этап, ориентировочный прогресс и итоговый статус | MUST | CURRENT |
 | FR-UI-003 | Позволять скачать результаты и открыть локальные папки | MUST | CURRENT |
 | FR-UI-004 | Длинное имя файла не расширяет карточку; extension видно, полное имя доступно через tooltip и accessible name | MUST | CURRENT |
-| FR-RT-001 | Захватывать системный звук и микрофон без виртуального драйвера | MUST | BLOCKED: ScreenCaptureKit получает `userDeclined` у целевого no-admin пользователя |
+| FR-RT-001 | Захватывать системный звук и микрофон без виртуального драйвера | MUST | BLOCKED: Core Audio Tap и отдельный microphone-контур реализованы, но signed no-admin TCC acceptance не выполнен |
 | FR-RT-002 | Передавать два PCM-потока только через локальные pipes | MUST | CURRENT |
-| FR-RT-003 | Распознавать короткие перекрывающиеся окна и обновлять живой текст | MUST | PLANNED |
-| FR-RT-004 | После завершения сохранять финальные TXT, JSON и DOCX | MUST | PLANNED |
+| FR-RT-003 | Распознавать короткие перекрывающиеся окна и обновлять живой текст | MUST | BLOCKED: core/API/UI реализованы и покрыты тестами, live dual-source acceptance не выполнен |
+| FR-RT-004 | После завершения сохранять финальные TXT, JSON и DOCX | MUST | BLOCKED: export реализован и покрыт тестами, live packaged acceptance не выполнен |
 
 ## Нефункциональные требования
 
@@ -47,16 +47,16 @@
 | NFR-PRIV-002 | Собственный интерфейс слушает только `127.0.0.1` | MUST | CURRENT |
 | NFR-PRIV-003 | HF token существует только в памяти текущего процесса | MUST | CURRENT |
 | NFR-PRIV-004 | После получения моделей включается offline mode Hugging Face | MUST | CURRENT |
-| NFR-INST-001 | Установка и первый рабочий запуск выполняются без прав администратора | MUST | BLOCKED: копирование доступно, permission acceptance не пройден |
-| NFR-PLAT-001 | Целевая платформа — Apple Silicon, macOS 15+ | MUST | BLOCKED: embedded Python и FFmpeg текущего artifact требуют macOS 26 |
+| NFR-INST-001 | Установка и первый рабочий запуск выполняются без прав администратора | MUST | BLOCKED: internal candidate существует, clean corporate no-admin/MDM/TCC acceptance не пройден |
+| NFR-PLAT-001 | Целевая платформа — Apple Silicon, macOS 15+ | MUST | BLOCKED: 417 Mach-O проходят arm64/minOS audit, но запуск на чистой macOS 15 не подтверждён |
 | NFR-ID-001 | Bundle ID остаётся `com.ainikitadanik.transcriber` | MUST | CURRENT |
 | NFR-DATA-001 | Основной корень данных остаётся `~/Library/Application Support/Транскрибатор` | MUST | CURRENT |
 | NFR-REL-001 | Ожидаемая пользовательская ошибка имеет понятное русское сообщение | MUST | CURRENT частично |
 | NFR-REL-002 | Временные pipeline-файлы удаляются после задачи | MUST | CURRENT |
 | NFR-RT-001 | RAM-буфер каждого realtime-источника ограничен 120 секундами | MUST | CURRENT |
 | NFR-TEST-001 | Изменение поведения сопровождается тестом или зафиксированной причиной его отсутствия | MUST | PROCESS |
-| NFR-RELSE-001 | Внешний релиз подписан Developer ID и нотариализован | MUST | PLANNED |
-| NFR-LIC-001 | В поставке присутствуют лицензии фактически включённых компонентов | MUST | BLOCKED: в artifact не найдены лицензии `python-docx` и `transformers` |
+| NFR-RELSE-001 | Внешний релиз подписан Developer ID и нотариализован | MUST | BLOCKED: доступен только internal ad-hoc candidate |
+| NFR-LIC-001 | В поставке присутствуют лицензии фактически включённых компонентов | MUST | CURRENT: audit internal candidate сопоставил 41 Python package |
 | NFR-UI-001 | UI не создаёт horizontal overflow на ширинах 480–1440 px | MUST | CURRENT |
 | NFR-A11Y-001 | Tabs и основные controls доступны с клавиатуры и имеют видимый focus | MUST | CURRENT |
 
@@ -78,7 +78,8 @@
 - diarization определяет условные кластеры, а не личности;
 - результат ASR не гарантирует дословную точность и требует пользовательской
   проверки в ответственных сценариях;
-- realtime ASR ещё не реализован.
+- realtime core/API/UI и локальный export реализованы, но не считаются
+  product-ready до signed dual-source TCC и 30-минутной packaged приёмки.
 
 ## Требования к совместимости
 

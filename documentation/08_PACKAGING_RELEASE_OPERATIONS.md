@@ -1,7 +1,7 @@
 # Упаковка и выпуск
 
 Статус: операционная спецификация
-Актуально на: 2026-07-20
+Актуально на: 2026-07-28
 Текущая версия кода: 0.2.0
 Последний опубликованный релиз: 0.1.1
 
@@ -75,10 +75,10 @@
 На момент фиксации постоянная signing identity отсутствует, поэтому 0.2.0 не
 считается готовой к внешнему распространению.
 
-Текущий artifact не является эталоном совместимости: native shell имеет
-minimum macOS 15.0, но embedded Python framework и FFmpeg — 26.0. Release
-runtime и media layer должны собираться в macOS-15-compatible окружении, а
-minimum-OS audit должен проверять все Mach-O, не только shell.
+Internal candidate собран воспроизводимым user-local Python toolchain.
+Artifact audit проверил 417 Mach-O: все arm64 и имеют minimum macOS не выше
+15.0. Это закрывает структурный artifact gate, но не заменяет запуск на чистой
+macOS 15.
 
 Подпись выполняется bottom-up: каждый вложенный Mach-O получает Developer ID
 и hardened runtime до подписи внешнего `.app`. `codesign --deep` не является
@@ -108,6 +108,21 @@ minimum-OS audit должен проверять все Mach-O, не тольк�
 - major — несовместимое изменение пользовательского или data-контракта.
 
 JSON schema версионируется отдельно и не обязана совпадать с версией приложения.
+
+## Evidence internal candidate 2026-07-28
+
+- 72/72 автоматических теста проходят;
+- frozen runtime `/api/health` возвращает точные `build_id` и `instance_id`;
+- offline file-ASR smoke с `HF_HUB_OFFLINE=1`, explicit bundled GigaAM path и
+  без token завершился `done`: 10-секундный WAV дал TXT 284 B, JSON 2.1 KiB и
+  DOCX 38 KiB, 1 сегмент/136 символов, `processing.mode=local_windows`,
+  `device=cpu`;
+- 417 Mach-O проходят arm64/minOS <= 15 audit;
+- product FFmpeg проходит LGPL/network-disabled capability audit;
+- 41 фактически включённый Python package сопоставлен с license material;
+- подпись candidate только ad hoc.
+
+Это внутренний candidate, не transferable product release.
 
 ## Release checklist
 

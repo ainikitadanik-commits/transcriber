@@ -1,7 +1,7 @@
 # Спецификация near-real-time режима
 
 Статус: целевая спецификация, реализация частичная
-Актуально на: 2026-07-20
+Актуально на: 2026-07-28
 
 ## Цель
 
@@ -14,26 +14,29 @@ GigaAM не является streaming ASR. Поэтому термин **near-r
 
 ## Текущая граница готовности
 
-Реализовано:
+Реализовано во внутреннем candidate:
 
 - UI режима и состояния Start/Pause/Stop;
-- native capture через ScreenCaptureKit и AVFoundation;
+- native capture через private Core Audio Tap и отдельный AVAudioEngine
+  microphone-контур;
 - отдельные system/microphone потоки;
 - преобразование в `pcm_s16le`, mono, 16 кГц;
 - локальные pipes;
 - ограниченные RAM-буферы до 120 секунд на источник;
 - события о разрешениях и наличии аудио;
-- API start/status/stop.
+- API start/status/stop;
+- bounded scheduler коротких перекрывающихся окон;
+- локальный GigaAM adapter, overlap dedup и committed/provisional state;
+- финализация и локальный TXT/JSON/DOCX export без записи исходного PCM.
 
-Не реализовано:
+Не подтверждено:
 
-- scheduler окон;
-- передача окон в GigaAM;
-- дедупликация перекрытий;
-- живой подтверждённый текст;
+- live signed TCC запуск двух источников на чистом corporate no-admin Mac;
+- continuity разрешений после restart/update с постоянной Developer ID
+  identity;
+- 30-минутная dual-source встреча и latency benchmark;
 - пауза как полноценная семантика с продолжением сессии;
-- финализация и экспорт результата;
-- продуктовая приёмка 30-минутной встречи.
+- MDM denial на реальном управляемом устройстве.
 
 ## Состояния сессии
 
@@ -53,7 +56,8 @@ error|done -> idle
 
 ### System
 
-Системный звук приложений встречи через ScreenCaptureKit.
+Системный звук приложений встречи через private/global Core Audio Tap с
+исключением собственного процесса.
 
 ### Microphone
 
@@ -147,6 +151,9 @@ UI должен различать:
 Решение: расширить 1.x или создать 2.0 — открыто до реализации.
 
 ## Критерии приёмки realtime-MVP
+
+Зелёные unit/integration tests подтверждают внутренний контур, но не заменяют
+signed TCC acceptance.
 
 1. 30-минутная тестовая встреча проходит без роста RAM сверх установленных
    границ.

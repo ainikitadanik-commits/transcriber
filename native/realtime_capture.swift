@@ -1,21 +1,47 @@
 import AppKit
 import AVFoundation
-import CoreMedia
+import CoreAudio
 import Darwin
 import Foundation
-@preconcurrency import ScreenCaptureKit
 
 @MainActor
 final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
+    private struct RuntimeMarker: Codable {
+        let buildID: String
+        let instanceID: String
+        let pid: Int32
+
+        enum CodingKeys: String, CodingKey {
+            case buildID = "build_id"
+            case instanceID = "instance_id"
+            case pid
+        }
+    }
+
+    private enum InterfaceState {
+        case unavailable
+        case owned
+        case foreign
+    }
+
     private let dataRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Транскрибатор")
+    private var instanceID = UUID().uuidString.lowercased()
+    private let buildID =
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        ?? "development"
     private var runtimeProcess: Process?
     private var logHandle: FileHandle?
     private var statusItem: NSStatusItem?
     private var startupTimer: Timer?
     private var startupAttempts = 0
+    private var expectedRuntimePID: Int32?
     private var didStart = false
     private let interfaceURL = URL(string: "http://127.0.0.1:7860")!
+    private var markerURL: URL {
+        dataRoot.appendingPathComponent("runtime-instance.json")
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         start()
@@ -25,19 +51,36 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
         guard !didStart else { return }
         didStart = true
         configureMenuBar()
-        if interfaceIsAvailable() {
-            openInterface()
+        if let marker = readRuntimeMarker(), marker.buildID == buildID {
+            switch interfaceState(
+                expectedInstanceID: marker.instanceID,
+                expectedPID: marker.pid
+            ) {
+            case .owned:
+                openInterface()
+                return
+            case .unavailable where processIsRunning(marker.pid):
+                instanceID = marker.instanceID
+                expectedRuntimePID = marker.pid
+                scheduleRuntimePoll()
+                return
+            case .foreign:
+                showError("Порт 7860 занят другим локальным процессом.")
+                return
+            case .unavailable:
+                removeRuntimeMarker(ifMatching: marker)
+            }
+        }
+        if interfaceState(
+            expectedInstanceID: instanceID,
+            expectedPID: nil
+        ) == .foreign {
+            showError("Порт 7860 занят другим локальным процессом.")
             return
         }
         do {
             try launchRuntime()
-            startupTimer = Timer.scheduledTimer(
-                timeInterval: 0.25,
-                target: self,
-                selector: #selector(pollRuntime),
-                userInfo: nil,
-                repeats: true
-            )
+            scheduleRuntimePoll()
         } catch {
             showError(error.localizedDescription)
         }
@@ -46,6 +89,13 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         if let process = runtimeProcess, process.isRunning {
             process.terminate()
+            removeRuntimeMarker(
+                ifMatching: RuntimeMarker(
+                    buildID: buildID,
+                    instanceID: instanceID,
+                    pid: process.processIdentifier
+                )
+            )
         }
         try? logHandle?.close()
     }
@@ -114,6 +164,8 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
 
         var environment = ProcessInfo.processInfo.environment
         environment["TRANSCRIBER_DATA_DIR"] = dataRoot.path
+        environment["TRANSCRIBER_BUILD_ID"] = buildID
+        environment["TRANSCRIBER_INSTANCE_ID"] = instanceID
         environment["TRANSCRIBER_GIGAAM_MODELS_DIR"] = resources
             .appendingPathComponent("models/gigaam").path
         environment["TRANSCRIBER_CAPTURE_HELPER"] = executable.path
@@ -137,6 +189,13 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
         process.standardError = handle
         process.terminationHandler = { [weak self] process in
             Task { @MainActor in
+                self?.removeRuntimeMarker(
+                    ifMatching: RuntimeMarker(
+                        buildID: self?.buildID ?? "",
+                        instanceID: self?.instanceID ?? "",
+                        pid: process.processIdentifier
+                    )
+                )
                 guard process.terminationStatus != 0 else { return }
                 self?.showError(
                     "Локальный процесс завершился с кодом \(process.terminationStatus). "
@@ -146,11 +205,28 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
         }
         try process.run()
         runtimeProcess = process
+        expectedRuntimePID = process.processIdentifier
+        do {
+            try writeRuntimeMarker(
+                RuntimeMarker(
+                    buildID: buildID,
+                    instanceID: instanceID,
+                    pid: process.processIdentifier
+                )
+            )
+        } catch {
+            process.terminate()
+            runtimeProcess = nil
+            throw error
+        }
     }
 
-    private func interfaceIsAvailable() -> Bool {
+    private func interfaceState(
+        expectedInstanceID: String,
+        expectedPID: Int32?
+    ) -> InterfaceState {
         let descriptor = socket(AF_INET, SOCK_STREAM, 0)
-        guard descriptor >= 0 else { return false }
+        guard descriptor >= 0 else { return .unavailable }
         defer { close(descriptor) }
 
         var timeout = timeval(tv_sec: 0, tv_usec: 100_000)
@@ -174,7 +250,7 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
         address.sin_family = sa_family_t(AF_INET)
         address.sin_port = in_port_t(7_860).bigEndian
         guard inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) == 1 else {
-            return false
+            return .unavailable
         }
         let connected = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -185,23 +261,100 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
                 ) == 0
             }
         }
-        guard connected else { return false }
+        guard connected else { return .unavailable }
 
-        let request = "GET /api/realtime/status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n"
+        let request = "GET /api/health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n"
         let sent = request.withCString {
             Darwin.send(descriptor, $0, strlen($0), 0)
         }
-        guard sent == request.utf8.count else { return false }
+        guard sent == request.utf8.count else { return .foreign }
 
         var response = [UInt8](repeating: 0, count: 4_096)
-        let received = Darwin.recv(descriptor, &response, response.count, 0)
-        guard
-            received > 0,
-            let text = String(bytes: response.prefix(received), encoding: .utf8)
-        else {
-            return false
+        var responseData = Data()
+        while responseData.count < 16_384 {
+            let received = Darwin.recv(descriptor, &response, response.count, 0)
+            guard received > 0 else { break }
+            responseData.append(contentsOf: response.prefix(received))
         }
-        return text.contains(" 200 ") && text.contains("\"audio_format\"")
+        guard
+            !responseData.isEmpty,
+            let text = String(data: responseData, encoding: .utf8),
+            let separator = text.range(of: "\r\n\r\n")
+        else {
+            return .foreign
+        }
+        let header = String(text[..<separator.lowerBound])
+        guard let statusLine = header.split(separator: "\r\n", maxSplits: 1).first else {
+            return .foreign
+        }
+        let statusParts = statusLine.split(separator: " ")
+        guard statusParts.count >= 2, statusParts[1] == "200" else {
+            return .foreign
+        }
+        let body = Data(text[separator.upperBound...].utf8)
+        let payload = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let matchesPID =
+            expectedPID.map { payload?["pid"] as? Int == Int($0) } ?? true
+        guard
+            let payload,
+            payload["product"] as? String == "transcriber",
+            payload["schema_version"] as? Int == 1,
+            payload["build_id"] as? String == buildID,
+            payload["instance_id"] as? String == expectedInstanceID,
+            matchesPID
+        else {
+            return .foreign
+        }
+        return .owned
+    }
+
+    private func scheduleRuntimePoll() {
+        startupTimer = Timer.scheduledTimer(
+            timeInterval: 0.25,
+            target: self,
+            selector: #selector(pollRuntime),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    private func readRuntimeMarker() -> RuntimeMarker? {
+        guard
+            let data = try? Data(contentsOf: markerURL),
+            let marker = try? JSONDecoder().decode(RuntimeMarker.self, from: data)
+        else {
+            return nil
+        }
+        return marker
+    }
+
+    private func writeRuntimeMarker(_ marker: RuntimeMarker) throws {
+        try FileManager.default.createDirectory(
+            at: dataRoot,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let data = try JSONEncoder().encode(marker)
+        try data.write(to: markerURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: markerURL.path
+        )
+    }
+
+    private func removeRuntimeMarker(ifMatching expected: RuntimeMarker) {
+        guard let marker = readRuntimeMarker(), marker.pid == expected.pid,
+              marker.buildID == expected.buildID,
+              marker.instanceID == expected.instanceID
+        else {
+            return
+        }
+        try? FileManager.default.removeItem(at: markerURL)
+    }
+
+    private func processIsRunning(_ pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        return kill(pid, 0) == 0 || errno == EPERM
     }
 
     private func openInterface() {
@@ -231,14 +384,24 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func pollRuntime() {
         startupAttempts += 1
-        if interfaceIsAvailable() {
+        switch interfaceState(
+            expectedInstanceID: instanceID,
+            expectedPID: expectedRuntimePID
+        ) {
+        case .owned:
             startupTimer?.invalidate()
             startupTimer = nil
             openInterface()
-        } else if startupAttempts >= 80 {
+        case .foreign:
+            startupTimer?.invalidate()
+            startupTimer = nil
+            showError("Порт 7860 занят другим локальным процессом.")
+        case .unavailable where startupAttempts >= 80:
             startupTimer?.invalidate()
             startupTimer = nil
             showError("Локальный интерфейс не запустился. Проверьте журнал приложения.")
+        case .unavailable:
+            break
         }
     }
 
@@ -307,9 +470,65 @@ final class EventWriter: @unchecked Sendable {
             FileHandle.standardOutput.write(newline)
         }
     }
+
+    func sendFailure(_ failure: CaptureFailure) {
+        if let permissionState = failure.permissionState {
+            send(
+                "permission_state",
+                extra: [
+                    "source": failure.source,
+                    "state": permissionState,
+                ]
+            )
+        }
+        var error: [String: Any] = [
+            "source": failure.source,
+            "state": "error",
+            "error_code": failure.code,
+            "error_domain": failure.domain,
+            "retryable": failure.retryable,
+            "message": failure.message,
+        ]
+        if let nativeCode = failure.nativeCode {
+            error["native_code"] = nativeCode
+        }
+        send("error", extra: error)
+    }
 }
 
-final class PCMWriter {
+struct CaptureFailure: Error, LocalizedError, Sendable {
+    let source: String
+    let domain: String
+    let code: String
+    let nativeCode: Int?
+    let permissionState: String?
+    let retryable: Bool
+    let message: String
+
+    init(
+        source: String,
+        domain: String,
+        code: String,
+        nativeCode: Int? = nil,
+        permissionState: String? = nil,
+        retryable: Bool = false,
+        message: String
+    ) {
+        self.source = source
+        self.domain = domain
+        self.code = code
+        self.nativeCode = nativeCode
+        self.permissionState = permissionState
+        self.retryable = retryable
+        self.message = message
+    }
+
+    var errorDescription: String? {
+        message
+    }
+}
+
+final class PCMWriter: @unchecked Sendable {
     private let outputFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16,
         sampleRate: 16_000,
@@ -324,30 +543,17 @@ final class PCMWriter {
         file = FileHandle(fileDescriptor: fileDescriptor, closeOnDealloc: false)
     }
 
-    func write(_ sampleBuffer: CMSampleBuffer) throws -> Int {
-        guard
-            CMSampleBufferDataIsReady(sampleBuffer),
-            let formatDescription = sampleBuffer.formatDescription
-        else {
+    func write(
+        bufferList: UnsafePointer<AudioBufferList>,
+        format: AVAudioFormat
+    ) throws -> Int {
+        guard let inputBuffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            bufferListNoCopy: bufferList,
+            deallocator: nil
+        ) else {
             return 0
         }
-        let sourceFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription)
-
-        let frameCount = AVAudioFrameCount(sampleBuffer.numSamples)
-        guard
-            frameCount > 0,
-            let inputBuffer = AVAudioPCMBuffer(
-                pcmFormat: sourceFormat,
-                frameCapacity: frameCount
-            )
-        else {
-            return 0
-        }
-        inputBuffer.frameLength = frameCount
-        try sampleBuffer.copyPCMData(
-            fromRange: 0..<Int(frameCount),
-            into: inputBuffer.mutableAudioBufferList
-        )
         return try write(inputBuffer)
     }
 
@@ -417,50 +623,10 @@ final class PCMWriter {
     }
 }
 
-final class CaptureReceiver: NSObject, SCStreamOutput, SCStreamDelegate {
-    private let writer: EventWriter
-    private let systemPCM: PCMWriter
-    private let microphonePCM: PCMWriter
-
-    init(writer: EventWriter, systemFD: Int32, microphoneFD: Int32) {
-        self.writer = writer
-        systemPCM = PCMWriter(fileDescriptor: systemFD)
-        microphonePCM = PCMWriter(fileDescriptor: microphoneFD)
-    }
-
-    func stream(
-        _ stream: SCStream,
-        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
-        of outputType: SCStreamOutputType
-    ) {
-        do {
-            switch outputType {
-            case .audio:
-                let count = try systemPCM.write(sampleBuffer)
-                if count > 0 {
-                    writer.reportAudio(for: "system", byteCount: count)
-                }
-            case .microphone:
-                let count = try microphonePCM.write(sampleBuffer)
-                if count > 0 {
-                    writer.reportAudio(for: "microphone", byteCount: count)
-                }
-            default:
-                break
-            }
-        } catch {
-            writer.send("error", extra: ["message": error.localizedDescription])
-        }
-    }
-
-    func stream(_ stream: SCStream, didStopWithError error: any Error) {
-        writer.send("error", extra: ["message": error.localizedDescription])
-    }
-}
-
 final class TerminationWaiter: @unchecked Sendable {
     private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Never>?
+    private var continuation: CheckedContinuation<CaptureFailure?, Never>?
+    private var result: CaptureFailure?
     private var signaled = false
     private let interruptSource: DispatchSourceSignal
     private let terminateSource: DispatchSourceSignal
@@ -476,12 +642,13 @@ final class TerminationWaiter: @unchecked Sendable {
         terminateSource.resume()
     }
 
-    func wait() async {
+    func wait() async -> CaptureFailure? {
         await withCheckedContinuation { continuation in
             lock.lock()
             if signaled {
+                let result = self.result
                 lock.unlock()
-                continuation.resume()
+                continuation.resume(returning: result)
             } else {
                 self.continuation = continuation
                 lock.unlock()
@@ -489,16 +656,321 @@ final class TerminationWaiter: @unchecked Sendable {
         }
     }
 
-    private func finish() {
+    func finish(with failure: CaptureFailure? = nil) {
         lock.lock()
+        guard !signaled else {
+            lock.unlock()
+            return
+        }
+        signaled = true
+        result = failure
         if let continuation {
             self.continuation = nil
             lock.unlock()
-            continuation.resume()
+            continuation.resume(returning: failure)
         } else {
-            signaled = true
             lock.unlock()
         }
+    }
+}
+
+final class MicrophoneCapture: @unchecked Sendable {
+    private let engine = AVAudioEngine()
+    private let writer: EventWriter
+    private let pcm: PCMWriter
+    private let onFailure: @Sendable (CaptureFailure) -> Void
+    private var tapInstalled = false
+
+    init(
+        writer: EventWriter,
+        fileDescriptor: Int32,
+        onFailure: @escaping @Sendable (CaptureFailure) -> Void
+    ) {
+        self.writer = writer
+        pcm = PCMWriter(fileDescriptor: fileDescriptor)
+        self.onFailure = onFailure
+    }
+
+    func start() async throws {
+        let authorization = AVCaptureDevice.authorizationStatus(for: .audio)
+        let granted: Bool
+        switch authorization {
+        case .authorized:
+            granted = true
+        case .notDetermined:
+            granted = await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { allowed in
+                    continuation.resume(returning: allowed)
+                }
+            }
+        case .denied, .restricted:
+            granted = false
+        @unknown default:
+            granted = false
+        }
+        guard granted else {
+            let restricted = authorization == .restricted
+            throw CaptureFailure(
+                source: "microphone",
+                domain: "AVFoundation",
+                code: restricted ? "permission_restricted" : "permission_denied",
+                nativeCode: Int(authorization.rawValue),
+                permissionState: "denied",
+                retryable: !restricted,
+                message: "Нет разрешения на доступ к микрофону."
+            )
+        }
+
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw CaptureFailure(
+                source: "microphone",
+                domain: "AVFoundation",
+                code: "device_unavailable",
+                nativeCode: 1,
+                permissionState: "unavailable",
+                retryable: true,
+                message: "Микрофон не предоставил поддерживаемый аудиоформат."
+            )
+        }
+        input.installTap(onBus: 0, bufferSize: 4_096, format: format) {
+            [writer, pcm, onFailure] buffer, _ in
+            do {
+                let count = try pcm.write(buffer)
+                if count > 0 {
+                    writer.reportAudio(for: "microphone", byteCount: count)
+                }
+            } catch {
+                onFailure(
+                    CaptureFailure(
+                        source: "microphone",
+                        domain: (error as NSError).domain,
+                        code: "capture_failed",
+                        nativeCode: (error as NSError).code,
+                        message: error.localizedDescription
+                    )
+                )
+            }
+        }
+        tapInstalled = true
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            stop()
+            throw CaptureFailure(
+                source: "microphone",
+                domain: (error as NSError).domain,
+                code: "device_unavailable",
+                nativeCode: (error as NSError).code,
+                permissionState: "unavailable",
+                retryable: true,
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    func stop() {
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+        if engine.isRunning {
+            engine.stop()
+        }
+    }
+}
+
+final class SystemAudioCapture: @unchecked Sendable {
+    private let writer: EventWriter
+    private let pcm: PCMWriter
+    private let onFailure: @Sendable (CaptureFailure) -> Void
+    private let ioQueue = DispatchQueue(label: "transcriber.capture.system")
+    private var tapID = AudioObjectID(kAudioObjectUnknown)
+    private var aggregateID = AudioObjectID(kAudioObjectUnknown)
+    private var ioProcID: AudioDeviceIOProcID?
+    private var started = false
+
+    init(
+        writer: EventWriter,
+        fileDescriptor: Int32,
+        onFailure: @escaping @Sendable (CaptureFailure) -> Void
+    ) {
+        self.writer = writer
+        pcm = PCMWriter(fileDescriptor: fileDescriptor)
+        self.onFailure = onFailure
+    }
+
+    func start() throws {
+        let tapDescription = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        tapDescription.name = "Транскрибатор — системный звук"
+        tapDescription.isPrivate = true
+        tapDescription.muteBehavior = .unmuted
+
+        var status = AudioHardwareCreateProcessTap(tapDescription, &tapID)
+        guard status == noErr else {
+            throw coreAudioFailure(status, operation: "создать системный аудиопоток")
+        }
+
+        do {
+            let tapUID = try readTapUID()
+            var streamDescription = try readTapFormat()
+            guard let inputFormat = AVAudioFormat(streamDescription: &streamDescription) else {
+                throw CaptureFailure(
+                    source: "system",
+                    domain: "CoreAudio",
+                    code: "device_unavailable",
+                    nativeCode: 1,
+                    permissionState: "unavailable",
+                    retryable: true,
+                    message: "Core Audio Tap не предоставил поддерживаемый формат."
+                )
+            }
+
+            let aggregateDescription: [String: Any] = [
+                "name": "Транскрибатор — системный звук",
+                "uid": "ru.transcriber.capture.\(UUID().uuidString)",
+                "private": true,
+                "tapautostart": false,
+                "taps": [
+                    [
+                        "uid": tapUID,
+                        "drift": true,
+                    ],
+                ],
+            ]
+            status = AudioHardwareCreateAggregateDevice(
+                aggregateDescription as CFDictionary,
+                &aggregateID
+            )
+            guard status == noErr else {
+                throw coreAudioFailure(status, operation: "создать приватное aggregate-устройство")
+            }
+
+            status = AudioDeviceCreateIOProcIDWithBlock(
+                &ioProcID,
+                aggregateID,
+                ioQueue
+            ) { [writer, pcm, onFailure] _, inputData, _, _, _ in
+                guard inputData.pointee.mNumberBuffers > 0 else {
+                    return
+                }
+                do {
+                    let count = try pcm.write(bufferList: inputData, format: inputFormat)
+                    if count > 0 {
+                        writer.reportAudio(for: "system", byteCount: count)
+                    }
+                } catch {
+                    onFailure(
+                        CaptureFailure(
+                            source: "system",
+                            domain: (error as NSError).domain,
+                            code: "capture_failed",
+                            nativeCode: (error as NSError).code,
+                            message: error.localizedDescription
+                        )
+                    )
+                }
+            }
+            guard status == noErr, let ioProcID else {
+                throw coreAudioFailure(status, operation: "создать callback системного звука")
+            }
+
+            status = AudioDeviceStart(aggregateID, ioProcID)
+            guard status == noErr else {
+                throw coreAudioFailure(status, operation: "запустить системный аудиопоток")
+            }
+            started = true
+        } catch {
+            stop()
+            throw error
+        }
+    }
+
+    func stop() {
+        if started, let ioProcID {
+            AudioDeviceStop(aggregateID, ioProcID)
+            started = false
+        }
+        if let ioProcID, aggregateID != kAudioObjectUnknown {
+            AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
+            self.ioProcID = nil
+        }
+        if aggregateID != kAudioObjectUnknown {
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+            aggregateID = AudioObjectID(kAudioObjectUnknown)
+        }
+        if tapID != kAudioObjectUnknown {
+            AudioHardwareDestroyProcessTap(tapID)
+            tapID = AudioObjectID(kAudioObjectUnknown)
+        }
+    }
+
+    private func readTapUID() throws -> CFString {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let status = AudioObjectGetPropertyData(
+            tapID,
+            &address,
+            0,
+            nil,
+            &size,
+            &value
+        )
+        guard status == noErr else {
+            throw coreAudioFailure(status, operation: "прочитать свойства Core Audio Tap")
+        }
+        guard let value else {
+            throw CaptureFailure(
+                source: "system",
+                domain: "CoreAudio",
+                code: "capture_failed",
+                nativeCode: 1,
+                message: "Core Audio Tap не предоставил UID."
+            )
+        }
+        return value.takeRetainedValue()
+    }
+
+    private func readTapFormat() throws -> AudioStreamBasicDescription {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let status = AudioObjectGetPropertyData(
+            tapID,
+            &address,
+            0,
+            nil,
+            &size,
+            &value
+        )
+        guard status == noErr else {
+            throw coreAudioFailure(status, operation: "прочитать формат Core Audio Tap")
+        }
+        return value
+    }
+
+    private func coreAudioFailure(_ status: OSStatus, operation: String) -> CaptureFailure {
+        let permissionDenied = status == kAudioDevicePermissionsError
+        return CaptureFailure(
+            source: "system",
+            domain: "CoreAudio",
+            code: permissionDenied ? "permission_denied" : "capture_failed",
+            nativeCode: Int(status),
+            permissionState: permissionDenied ? "denied" : nil,
+            retryable: true,
+            message: "Не удалось \(operation) (OSStatus \(status))."
+        )
     }
 }
 
@@ -513,9 +985,14 @@ enum RealtimeCapture {
             let microphoneFD = fileDescriptor(named: "--microphone-fd")
             if systemFD == nil && microphoneFD == nil {
                 guard Bundle.main.bundleURL.pathExtension == "app" else {
-                    writer.send(
-                        "error",
-                        extra: ["message": "Не переданы локальные PCM-каналы."]
+                    writer.sendFailure(
+                        CaptureFailure(
+                            source: "lifecycle",
+                            domain: "process.arguments",
+                            code: "invalid_arguments",
+                            nativeCode: 2,
+                            message: "Не переданы локальные PCM-каналы."
+                        )
                     )
                     Foundation.exit(2)
                 }
@@ -523,7 +1000,15 @@ enum RealtimeCapture {
                 return
             }
             guard let systemFD, let microphoneFD else {
-                writer.send("error", extra: ["message": "Не переданы локальные PCM-каналы."])
+                writer.sendFailure(
+                    CaptureFailure(
+                        source: "lifecycle",
+                        domain: "process.arguments",
+                        code: "invalid_arguments",
+                        nativeCode: 2,
+                        message: "Не переданы локальные PCM-каналы."
+                    )
+                )
                 Foundation.exit(2)
             }
             if CommandLine.arguments.contains("--self-test") {
@@ -534,69 +1019,78 @@ enum RealtimeCapture {
                 )
                 Foundation.exit(0)
             }
-            let content = try await SCShareableContent.excludingDesktopWindows(
-                false,
-                onScreenWindowsOnly: true
-            )
-            guard let display = content.displays.first else {
-                writer.send("error", extra: ["message": "Не найден доступный экран."])
-                Foundation.exit(2)
+            let termination = TerminationWaiter()
+            let microphoneCapture = MicrophoneCapture(
+                writer: writer,
+                fileDescriptor: microphoneFD
+            ) { failure in
+                termination.finish(with: failure)
+            }
+            let systemCapture = SystemAudioCapture(
+                writer: writer,
+                fileDescriptor: systemFD
+            ) { failure in
+                termination.finish(with: failure)
             }
 
-            let filter = SCContentFilter(
-                display: display,
-                excludingApplications: [],
-                exceptingWindows: []
+            writer.send(
+                "permission_state",
+                extra: ["source": "microphone", "state": "requesting"]
             )
-            let configuration = SCStreamConfiguration()
-            configuration.width = 2
-            configuration.height = 2
-            configuration.showsCursor = false
-            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-            configuration.capturesAudio = true
-            configuration.captureMicrophone = true
-            configuration.excludesCurrentProcessAudio = true
-            configuration.sampleRate = 48_000
-            configuration.channelCount = 1
-
-            let receiver = CaptureReceiver(
-                writer: writer,
-                systemFD: systemFD,
-                microphoneFD: microphoneFD
+            try await microphoneCapture.start()
+            writer.send(
+                "permission_state",
+                extra: ["source": "microphone", "state": "granted"]
             )
-            let stream = SCStream(
-                filter: filter,
-                configuration: configuration,
-                delegate: receiver
+            do {
+                writer.send(
+                    "permission_state",
+                    extra: ["source": "system", "state": "requesting"]
+                )
+                try systemCapture.start()
+            } catch {
+                microphoneCapture.stop()
+                throw error
+            }
+            writer.send(
+                "permission_state",
+                extra: ["source": "system", "state": "granted"]
             )
-            let systemQueue = DispatchQueue(label: "transcriber.capture.system")
-            let microphoneQueue = DispatchQueue(label: "transcriber.capture.microphone")
-            try stream.addStreamOutput(receiver, type: .audio, sampleHandlerQueue: systemQueue)
-            try stream.addStreamOutput(
-                receiver,
-                type: .microphone,
-                sampleHandlerQueue: microphoneQueue
-            )
-
-            try await stream.startCapture()
             writer.send(
                 "started",
                 extra: [
-                    "sample_rate": configuration.sampleRate,
-                    "channels": configuration.channelCount,
+                    "state": "capturing",
                     "pcm_sample_rate": 16_000,
                     "pcm_channels": 1,
                     "pcm_encoding": "pcm_s16le",
                 ]
             )
 
-            let termination = TerminationWaiter()
-            await termination.wait()
-
-            try await stream.stopCapture()
-            writer.send("stopped")
+            let runtimeFailure = await termination.wait()
+            writer.send(
+                "state",
+                extra: ["source": "lifecycle", "state": "stopping"]
+            )
+            systemCapture.stop()
+            microphoneCapture.stop()
+            if let runtimeFailure {
+                writer.sendFailure(runtimeFailure)
+                Foundation.exit(1)
+            }
+            writer.send("stopped", extra: ["state": "idle"])
+        } catch let failure as CaptureFailure {
+            writer.sendFailure(failure)
+            Foundation.exit(1)
         } catch {
-            writer.send("error", extra: ["message": error.localizedDescription])
+            writer.sendFailure(
+                CaptureFailure(
+                    source: "lifecycle",
+                    domain: (error as NSError).domain,
+                    code: "capture_failed",
+                    nativeCode: (error as NSError).code,
+                    message: error.localizedDescription
+                )
+            )
             Foundation.exit(1)
         }
     }
@@ -661,6 +1155,7 @@ enum RealtimeCapture {
             extra: [
                 "system_bytes": systemBytes,
                 "microphone_bytes": microphoneBytes,
+                "state": "self_test",
                 "sample_rate": 16_000,
                 "channels": 1,
                 "encoding": "pcm_s16le",
