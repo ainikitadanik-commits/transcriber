@@ -391,4 +391,14 @@ NOTARY_PROFILE="transcriber-notary" scripts/build_product_dmg.sh
 notary-профиля. Актуальные gates перечислены в
 `documentation/14_PRODUCT_READINESS_HEALTH_CHECK.md`.
 
+Для разовой внутренней проверки доверенным администратором можно собрать
+явно маркированный образ:
+
+```bash
+scripts/build_internal_admin_dmg.sh
+```
+
+Такой файл содержит `INTERNAL-UNNOTARIZED` в имени, не является публичным
+релизом и запускается только через штатный administrator override macOS.
+
 История изменений: [CHANGELOG.md](CHANGELOG.md).

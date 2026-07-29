@@ -209,6 +209,27 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("com.apple.quarantine", installer)
         self.assertNotIn("--noqtn", installer)
 
+    def test_internal_admin_dmg_is_explicit_and_does_not_bypass_gatekeeper(self):
+        script = (ROOT / "scripts/build_internal_admin_dmg.sh").read_text()
+        guide = (ROOT / "packaging/КАК ЗАПУСТИТЬ INTERNAL DMG.txt").read_text()
+
+        self.assertIn("INTERNAL-UNNOTARIZED", script)
+        self.assertIn("Signature=adhoc", script)
+        self.assertIn("audit_macho.sh", script)
+        self.assertIn("audit_ffmpeg.sh", script)
+        self.assertIn("audit_licenses.sh", script)
+        self.assertIn("audit_signatures.sh", script)
+        self.assertIn("hdiutil verify", script)
+        self.assertIn("shasum -a 256", script)
+        self.assertIn("/Applications", script)
+        self.assertNotIn("--noqtn", script)
+        self.assertNotIn("xattr", script)
+        self.assertNotIn("spctl --master-disable", script)
+        self.assertNotIn("sudo", script)
+        self.assertIn("INTERNAL / UNNOTARIZED", guide)
+        self.assertIn("Open Anyway", guide)
+        self.assertIn("Не отключайте Gatekeeper", guide)
+
     def test_release_shell_scripts_parse_as_zsh(self):
         scripts = [
             "audit_ffmpeg.sh",
@@ -219,6 +240,7 @@ class PackagingTests(unittest.TestCase):
             "sign_app_bundle.sh",
             "prepare_release_environment.sh",
             "build_product_dmg.sh",
+            "build_internal_admin_dmg.sh",
             "install_product_app.command",
             "rollback_product_app.command",
             "build_ffmpeg_lgpl.sh",
