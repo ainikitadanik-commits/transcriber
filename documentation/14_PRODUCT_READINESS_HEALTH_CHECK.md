@@ -1,9 +1,9 @@
 # Product readiness health-check
 
 Статус: internal candidate, внешний release `NO-GO`
-Дата проверки: 2026-07-28
-Source state: shared working tree `codex/product-app-release` поверх `6eb6893`;
-до интеграционного commit не является immutable release source
+Дата проверки: 2026-07-29
+Source state: `codex/product-app-release`; точный immutable commit будет записан
+в manifest финального DMG
 Целевая версия: product `.app` 0.2.x
 
 ## Verdict
@@ -30,6 +30,8 @@ acceptance. Наличие кода, unit tests и ad-hoc `.app` эти P0 не 
 | Product FFmpeg | PASS: LGPL, network disabled, required filters/muxer/protocols |
 | Python license audit | PASS: 41 included packages mapped |
 | Candidate signing | ad hoc only |
+| Final DMG release guard | IMPLEMENTED: requires Developer ID + notary profile, signs and assesses app/DMG |
+| Final signed DMG execution | BLOCKED: Apple identity/profile absent on build Mac |
 
 Offline file-ASR smoke выполнялся с `HF_HUB_OFFLINE=1`, explicit bundled GigaAM
 model directory и без token. Десятисекундный WAV завершился `status=done`:
@@ -67,7 +69,8 @@ AVAudioEngine microphone-контур, bounded PCM buffers, window scheduler,
    и private key.
 2. Подписать все nested Mach-O bottom-up и внешний `.app` стабильной identity.
 3. Выполнить notarization, stapling и Gatekeeper assessment.
-4. Собрать и проверить product DMG для установки в `~/Applications` без admin.
+4. Запустить подготовленный fail-closed product DMG pipeline и проверить
+   установку в `~/Applications` без admin.
 5. Выполнить L5 на чистой corporate no-admin учётной записи: install,
    system-audio/microphone prompts, MDM/TCC states, bundled offline file ASR,
    realtime dual-source, Stop/Quit/restart/update.

@@ -18,6 +18,10 @@ if [[ "$SIGNATURE_INFO" != *"Authority=Developer ID Application:"* ]]; then
   echo "Откат остановлен: предыдущая версия не подписана Developer ID Application." >&2
   exit 1
 fi
+if ! /usr/sbin/spctl --assess --type execute --verbose=4 "$PREVIOUS_APP"; then
+  echo "Откат остановлен: предыдущая версия не прошла Gatekeeper." >&2
+  exit 1
+fi
 
 if [[ -d "$INSTALLED_APP" ]]; then
   /bin/mv "$INSTALLED_APP" "$FAILED_APP"

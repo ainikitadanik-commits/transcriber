@@ -16,6 +16,12 @@ if [[ ! -d "$APP/Contents" ]]; then
   exit 1
 fi
 
+if [[ -z "$NOTARY_PROFILE" ]]; then
+  echo "Product DMG requires NOTARY_PROFILE for Apple notarization." >&2
+  echo "Create it with: xcrun notarytool store-credentials PROFILE_NAME" >&2
+  exit 1
+fi
+
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
   "$APP/Contents/Info.plist")
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
@@ -25,6 +31,16 @@ SIGNATURE_INFO=$(/usr/bin/codesign -dvvv "$APP" 2>&1 || true)
 if [[ "$SIGNATURE_INFO" != *"Authority=Developer ID Application:"* ]]; then
   echo "Product DMG requires a real Developer ID Application signature." >&2
   echo "Ad-hoc applications are local builds and are not release candidates." >&2
+  exit 1
+fi
+SIGN_IDENTITY=$(printf '%s\n' "$SIGNATURE_INFO" |
+  /usr/bin/awk '/^Authority=Developer ID Application:/ {
+    sub(/^Authority=/, "");
+    print;
+    exit
+  }')
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  echo "Cannot determine Developer ID identity from the application." >&2
   exit 1
 fi
 
@@ -53,34 +69,31 @@ fi
 /bin/rm -rf "$BUILD_ROOT"
 /bin/mkdir -p "$STAGING"
 
-if [[ -n "$NOTARY_PROFILE" ]]; then
-  APP_ZIP="$BUILD_ROOT/Transcriber-$VERSION.app.zip"
-  /usr/bin/ditto -c -k --keepParent "$APP" "$APP_ZIP"
-  xcrun notarytool submit "$APP_ZIP" \
-    --keychain-profile "$NOTARY_PROFILE" \
-    --wait
-  xcrun stapler staple "$APP"
-  xcrun stapler validate "$APP"
-fi
+APP_ZIP="$BUILD_ROOT/Transcriber-$VERSION.app.zip"
+/usr/bin/ditto -c -k --keepParent "$APP" "$APP_ZIP"
+xcrun notarytool submit "$APP_ZIP" \
+  --keychain-profile "$NOTARY_PROFILE" \
+  --wait
+xcrun stapler staple "$APP"
+xcrun stapler validate "$APP"
+/usr/sbin/spctl --assess --type execute --verbose=4 "$APP"
 
-/usr/bin/ditto --noextattr --noqtn --norsrc "$APP" "$STAGING/Транскрибатор.app"
-/usr/bin/ditto --noextattr --noqtn --norsrc \
+/usr/bin/ditto "$APP" "$STAGING/Транскрибатор.app"
+/usr/bin/ditto \
   "$ROOT/scripts/install_product_app.command" \
   "$STAGING/Установить Транскрибатор.command"
-/usr/bin/ditto --noextattr --noqtn --norsrc \
+/usr/bin/ditto \
   "$ROOT/scripts/rollback_product_app.command" \
   "$STAGING/Откатить Транскрибатор.command"
+/usr/bin/ditto \
+  "$ROOT/packaging/КАК УСТАНОВИТЬ.txt" \
+  "$STAGING/КАК УСТАНОВИТЬ.txt"
 /bin/chmod +x \
   "$STAGING/Установить Транскрибатор.command" \
   "$STAGING/Откатить Транскрибатор.command"
 
-if [[ -n "$NOTARY_PROFILE" ]]; then
-  ASSET_NAME="Transcriber-$VERSION-macOS-arm64"
-  NOTARIZATION_STATUS="accepted-and-stapled"
-else
-  ASSET_NAME="Transcriber-$VERSION-candidate-macOS-arm64"
-  NOTARIZATION_STATUS="not-requested"
-fi
+ASSET_NAME="Transcriber-$VERSION-macOS-arm64"
+NOTARIZATION_STATUS="accepted-and-stapled"
 
 DMG="$DIST_ROOT/$ASSET_NAME.dmg"
 SHA_FILE="$DMG.sha256"
@@ -93,21 +106,28 @@ MANIFEST="$DMG.manifest.txt"
   -ov \
   -format UDZO \
   "$DMG"
+/usr/bin/codesign \
+  --force \
+  --timestamp \
+  --sign "$SIGN_IDENTITY" \
+  "$DMG"
+/usr/bin/codesign --verify --strict --verbose=2 "$DMG"
 
-if [[ -n "$NOTARY_PROFILE" ]]; then
-  xcrun notarytool submit "$DMG" \
-    --keychain-profile "$NOTARY_PROFILE" \
-    --wait
-  xcrun stapler staple "$DMG"
-  xcrun stapler validate "$DMG"
-fi
+xcrun notarytool submit "$DMG" \
+  --keychain-profile "$NOTARY_PROFILE" \
+  --wait
+xcrun stapler staple "$DMG"
+xcrun stapler validate "$DMG"
 
 /usr/bin/hdiutil verify "$DMG"
+/usr/sbin/spctl \
+  --assess \
+  --type open \
+  --context context:primary-signature \
+  --verbose=4 \
+  "$DMG"
 "$ROOT/scripts/audit_signatures.sh" "$APP" 1
-
-if [[ -n "$NOTARY_PROFILE" ]]; then
-  /usr/sbin/spctl --assess --type execute --verbose=4 "$APP"
-fi
+/usr/sbin/spctl --assess --type execute --verbose=4 "$APP"
 
 DMG_SHA=$(/usr/bin/shasum -a 256 "$DMG" | /usr/bin/awk '{ print $1 }')
 printf '%s  %s\n' "$DMG_SHA" "${DMG:t}" > "$SHA_FILE"
@@ -119,6 +139,7 @@ printf '%s  %s\n' "$DMG_SHA" "${DMG:t}" > "$SHA_FILE"
   printf 'maximum_macos_minos=15.0\n'
   printf 'source_commit=%s\n' "$(/usr/bin/git -C "$ROOT" rev-parse HEAD)"
   printf 'signing=Developer ID Application\n'
+  printf 'signing_identity=%s\n' "$SIGN_IDENTITY"
   printf 'notarization=%s\n' "$NOTARIZATION_STATUS"
   printf 'dependency_lock_sha256=%s\n' "$LOCK_SHA"
   printf 'install_target=~/Applications/Транскрибатор.app\n'
