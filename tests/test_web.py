@@ -41,6 +41,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Из файла", html)
         self.assertIn("Рилтайм", html)
         self.assertIn("Транскрибация в реальном времени", html)
+        self.assertIn("transcriber-logo.png", html)
         self.assertIn("распознаются локально", html)
         self.assertIn("Живой текст", html)
         self.assertIn("Начать встречу", html)

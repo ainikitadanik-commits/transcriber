@@ -4,15 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Транскрибатор</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='transcriber-logo.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   </head>
   <body>
     <div class="app-background" aria-hidden="true"></div>
     <main class="shell">
       <header class="hero">
-        <div class="brand-mark" aria-hidden="true">
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
+        <img class="brand-mark" src="{{ url_for('static', filename='transcriber-logo.png') }}" alt="" aria-hidden="true">
         <div class="hero-copy">
           <p class="eyebrow">Локально на вашем Mac</p>
           <h1>Транскрибатор</h1>

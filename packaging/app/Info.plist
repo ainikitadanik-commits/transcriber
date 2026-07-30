@@ -10,6 +10,8 @@
   <string>Transcriber</string>
   <key>CFBundleIdentifier</key>
   <string>com.ainikitadanik.transcriber</string>
+  <key>CFBundleIconFile</key>
+  <string>Transcriber.icns</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>

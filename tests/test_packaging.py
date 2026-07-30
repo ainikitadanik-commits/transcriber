@@ -45,6 +45,7 @@ class PackagingTests(unittest.TestCase):
             "com.ainikitadanik.transcriber",
         )
         self.assertEqual(info["CFBundleExecutable"], "Transcriber")
+        self.assertEqual(info["CFBundleIconFile"], "Transcriber.icns")
         self.assertEqual(info["CFBundleShortVersionString"], "0.2.0")
         self.assertIn("локальной транскрибации", info["NSMicrophoneUsageDescription"])
         self.assertIn("локальной транскрибации", info["NSAudioCaptureUsageDescription"])
@@ -112,6 +113,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("audit_release_dependencies.sh", build_script)
         self.assertIn("prepare_release_environment.sh", build_script)
         self.assertIn("DEPENDENCY-INVENTORY.txt", build_script)
+        self.assertIn("Transcriber.icns", build_script)
         self.assertNotIn('codesign "${SIGN_ARGS[@]}" --deep', build_script)
 
     def test_release_lock_is_exact_and_excludes_local_editable_repo(self):

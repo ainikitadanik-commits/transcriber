@@ -81,6 +81,8 @@ mkdir -p "$RESOURCES/runtime/transcriber-runtime"
 /usr/bin/ditto --noextattr --noqtn --norsrc \
   "$ROOT/packaging/app/Info.plist" "$CONTENTS/Info.plist"
 /usr/bin/ditto --noextattr --noqtn --norsrc \
+  "$ROOT/packaging/app/Transcriber.icns" "$RESOURCES/Transcriber.icns"
+/usr/bin/ditto --noextattr --noqtn --norsrc \
   "$ROOT/packaging/Лицензии" "$RESOURCES/Лицензии"
 /usr/bin/ditto --noextattr --noqtn --norsrc \
   "$ROOT/docs/PRIVACY.md" "$RESOURCES/Приватность.md"
