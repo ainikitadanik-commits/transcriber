@@ -14,8 +14,10 @@ class FakeCapture:
         }
         self.status = "idle"
         self.stop_calls = 0
+        self.include_microphone = None
 
-    def start(self):
+    def start(self, *, include_microphone=False):
+        self.include_microphone = include_microphone
         self.status = "recording"
         return self.snapshot()
 
@@ -73,7 +75,7 @@ class RealtimeServiceTests(unittest.TestCase):
                 poll_interval=0.01,
             )
 
-            started = service.start()
+            started = service.start(include_microphone=True)
             self.assertEqual(started["status"], "recording")
             deadline = time.monotonic() + 2
             while not calls and time.monotonic() < deadline:
@@ -91,6 +93,36 @@ class RealtimeServiceTests(unittest.TestCase):
             self.assertFalse(list(output_dir.glob("*.pcm")))
             self.assertEqual({call[0] for call in calls}, {"system", "microphone"})
             self.assertTrue(all(call[2] == 16_000 for call in calls))
+            self.assertTrue(capture.include_microphone)
+
+    def test_default_session_never_drains_or_transcribes_microphone(self):
+        one_second = b"\x01\x00" * 16_000
+        capture = FakeCapture(one_second, one_second)
+        calls = []
+
+        def adapter(source, pcm, sample_rate):
+            calls.append(source)
+            return "реплика"
+
+        with tempfile.TemporaryDirectory() as directory:
+            service = RealtimeTranscriptionService(
+                capture,
+                Path(directory),
+                adapter_loader=lambda: (adapter, "cpu"),
+                window_seconds=0.5,
+                overlap_seconds=0.1,
+                poll_interval=0.01,
+            )
+            service.start()
+            deadline = time.monotonic() + 2
+            while not calls and time.monotonic() < deadline:
+                time.sleep(0.01)
+            service.stop()
+            self.assertTrue(service.wait(2))
+
+        self.assertEqual(set(calls), {"system"})
+        self.assertFalse(capture.include_microphone)
+        self.assertEqual(len(capture.audio["microphone"]), len(one_second))
 
     def test_model_failure_stops_capture_and_reports_error(self):
         capture = FakeCapture()

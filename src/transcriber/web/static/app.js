@@ -23,6 +23,8 @@ const liveStart = document.querySelector("#live-start");
 const livePause = document.querySelector("#live-pause");
 const liveStop = document.querySelector("#live-stop");
 const liveNotice = document.querySelector("#live-notice");
+const liveIncludeMicrophone = document.querySelector("#live-include-microphone");
+const liveSourceSummary = document.querySelector("#live-source-summary");
 const systemAudioState = document.querySelector("#system-audio-state");
 const microphoneState = document.querySelector("#microphone-state");
 const liveTranscriptContent = document.querySelector("#live-transcript-content");
@@ -170,6 +172,9 @@ function renderRealtime(state) {
     error: "Ошибка",
   }[state.status] || "Проверяем";
   const error = state.status === "error" || state.asr_status === "error";
+  const microphoneEnabled = active
+    ? Boolean(state.microphone_enabled)
+    : liveIncludeMicrophone.checked;
   setTextIfChanged(liveState, stateLabel);
   liveState.classList.toggle("planned", state.asr_status === "idle" && state.status === "idle");
   liveState.classList.toggle("recording", state.asr_status === "running");
@@ -186,9 +191,17 @@ function renderRealtime(state) {
       ? "ошибка"
       : "ожидаем";
   setTextIfChanged(systemAudioState, `Системный звук: ${state.system_audio ? "есть звук" : waitingLabel}`);
-  setTextIfChanged(microphoneState, `Микрофон: ${state.microphone ? "есть звук" : waitingLabel}`);
+  setTextIfChanged(
+    microphoneState,
+    `Микрофон: ${microphoneEnabled ? (state.microphone ? "есть звук" : waitingLabel) : "выключен"}`,
+  );
+  setTextIfChanged(
+    liveSourceSummary,
+    microphoneEnabled ? "Системный звук + микрофон" : "Только системный звук",
+  );
   systemAudioState.classList.toggle("active", Boolean(state.system_audio));
   microphoneState.classList.toggle("active", Boolean(state.microphone));
+  liveIncludeMicrophone.disabled = active;
   liveStart.disabled = !state.available || active;
   livePause.disabled = true;
   liveStop.disabled = !active;
@@ -220,7 +233,11 @@ liveStart.addEventListener("click", async () => {
   liveStart.disabled = true;
   liveNotice.textContent = "Запускаем встречу и загружаем модель…";
   try {
-    const response = await fetch("/api/realtime/start", { method: "POST" });
+    const response = await fetch("/api/realtime/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ include_microphone: liveIncludeMicrophone.checked }),
+    });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Не удалось начать встречу.");
     renderRealtime(data);

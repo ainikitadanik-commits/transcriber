@@ -298,8 +298,14 @@ def realtime_status():
 
 @app.post("/api/realtime/start")
 def realtime_start():
+    payload = request.get_json(silent=True) or {}
+    include_microphone = payload.get("include_microphone", False)
+    if not isinstance(include_microphone, bool):
+        return jsonify(error="Параметр include_microphone должен быть boolean."), 400
     try:
-        return jsonify(realtime_service.start()), 202
+        return jsonify(
+            realtime_service.start(include_microphone=include_microphone)
+        ), 202
     except RuntimeError as error:
         return jsonify(error=str(error)), 409
 

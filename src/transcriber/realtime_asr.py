@@ -77,6 +77,7 @@ class RealtimeASRSession:
         max_buffer_seconds: float = 120.0,
         max_windows_per_pump: int = 4,
         max_pending_segments: int = 1_024,
+        sources: tuple[str, ...] = SOURCES,
     ) -> None:
         if not 0 < window_seconds <= MAX_WINDOW_SECONDS:
             raise ValueError("ASR-окно должно быть больше 0 и не длиннее 25 секунд.")
@@ -88,6 +89,10 @@ class RealtimeASRSession:
             raise ValueError("За один проход нужно обрабатывать хотя бы одно окно.")
         if max_pending_segments < 1:
             raise ValueError("Очередь committed-сегментов не может быть пустой.")
+        if not sources or len(set(sources)) != len(sources) or any(
+            source not in SOURCES for source in sources
+        ):
+            raise ValueError("Источники ASR должны быть уникальным непустым набором.")
 
         self._asr = asr
         self._capture = capture
@@ -101,7 +106,8 @@ class RealtimeASRSession:
         )
         self._max_windows_per_pump = max_windows_per_pump
         self._max_pending_segments = max_pending_segments
-        self._sources = {source: _SourceState() for source in SOURCES}
+        self._source_order = tuple(sources)
+        self._sources = {source: _SourceState() for source in self._source_order}
         self._committed: deque[RealtimeSegment] = deque()
         self._next_source_index = 0
         self._finalized = False
@@ -126,7 +132,7 @@ class RealtimeASRSession:
         self._require_active()
         if self._capture is None:
             raise RuntimeError("Источник capture не передан.")
-        for source in SOURCES:
+        for source in self._source_order:
             state = self._sources[source]
             capacity = self._max_buffer_bytes - len(state.pcm)
             if capacity <= 0:
@@ -162,7 +168,7 @@ class RealtimeASRSession:
         while self._next_ready_source(peek=True) is not None:
             self.process_ready(max_windows=1)
 
-        for source in SOURCES:
+        for source in self._source_order:
             state = self._sources[source]
             buffered_samples = len(state.pcm) // PCM_SAMPLE_WIDTH
             buffer_end = state.buffer_start_samples + buffered_samples
@@ -187,7 +193,7 @@ class RealtimeASRSession:
             key=lambda segment: (
                 segment.start,
                 segment.end,
-                SOURCES.index(segment.source),
+                self._source_order.index(segment.source),
             ),
         )
         for segment in provisionals:
@@ -285,12 +291,12 @@ class RealtimeASRSession:
         state.last_window_end_samples = end_samples
 
     def _next_ready_source(self, *, peek: bool = False) -> str | None:
-        for offset in range(len(SOURCES)):
-            index = (self._next_source_index + offset) % len(SOURCES)
-            source = SOURCES[index]
+        for offset in range(len(self._source_order)):
+            index = (self._next_source_index + offset) % len(self._source_order)
+            source = self._source_order[index]
             if len(self._sources[source].pcm) >= self._window_bytes:
                 if not peek:
-                    self._next_source_index = (index + 1) % len(SOURCES)
+                    self._next_source_index = (index + 1) % len(self._source_order)
                 return source
         return None
 
@@ -323,7 +329,7 @@ class RealtimeASRSession:
                 key=lambda segment: (
                     segment.start,
                     segment.end,
-                    SOURCES.index(segment.source),
+                    self._source_order.index(segment.source),
                 ),
             )
         )

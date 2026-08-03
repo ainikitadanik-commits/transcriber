@@ -42,7 +42,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Рилтайм", html)
         self.assertIn("Транскрибация в реальном времени", html)
         self.assertIn("transcriber-logo.png", html)
-        self.assertIn("распознаются локально", html)
+        self.assertIn("распознаётся локально", html)
         self.assertIn("Живой текст", html)
         self.assertIn("Начать встречу", html)
         self.assertIn("<small>Скоро</small>", html)
@@ -58,7 +58,9 @@ class WebTests(unittest.TestCase):
         self.assertIn('id="live-json-link"', html)
         self.assertIn('id="live-docx-link"', html)
         self.assertIn("Системный звук: ожидаем", html)
-        self.assertIn("Микрофон: ожидаем", html)
+        self.assertIn("Микрофон: выключен", html)
+        self.assertIn('id="live-include-microphone"', html)
+        self.assertIn("mute внутри ВКС нельзя определить универсально", html)
         self.assertIn("PCM 16 кГц", html)
 
     def test_ui_preserves_accessible_contract_and_responsive_guards(self):
@@ -149,8 +151,30 @@ class WebTests(unittest.TestCase):
 
         self.assertEqual(start_response.status_code, 202)
         self.assertEqual(stop_response.status_code, 202)
-        start_mock.assert_called_once_with()
+        start_mock.assert_called_once_with(include_microphone=False)
         stop_mock.assert_called_once_with()
+
+    def test_realtime_start_can_explicitly_include_microphone(self):
+        with patch.object(
+            web.realtime_service,
+            "start",
+            return_value={"status": "starting", "asr_status": "loading"},
+        ) as start_mock:
+            response = self.client.post(
+                "/api/realtime/start",
+                json={"include_microphone": True},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        start_mock.assert_called_once_with(include_microphone=True)
+
+    def test_realtime_start_rejects_non_boolean_microphone_option(self):
+        response = self.client.post(
+            "/api/realtime/start",
+            json={"include_microphone": "yes"},
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_realtime_start_returns_actionable_error(self):
         with patch.object(

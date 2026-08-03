@@ -45,6 +45,7 @@ class RealtimeTranscriptionService:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._include_microphone = False
         self._session: RealtimeASRSession | None = None
         self._segments: list[RealtimeSegment] = []
         self._provisional: dict[str, RealtimeSegment] = {}
@@ -58,15 +59,17 @@ class RealtimeTranscriptionService:
             "json_name": None,
             "docx_name": None,
             "error": None,
+            "microphone_enabled": False,
         }
 
-    def start(self) -> dict[str, Any]:
+    def start(self, *, include_microphone: bool = False) -> dict[str, Any]:
         with self._lock:
             if self._thread and self._thread.is_alive():
                 raise RuntimeError("Realtime-транскрибация уже запущена.")
             self._segments = []
             self._provisional = {}
             self._session = None
+            self._include_microphone = include_microphone
             self._stop_event.clear()
             self._state = {
                 "asr_status": "loading",
@@ -78,10 +81,11 @@ class RealtimeTranscriptionService:
                 "json_name": None,
                 "docx_name": None,
                 "error": None,
+                "microphone_enabled": include_microphone,
             }
 
         try:
-            self._capture.start()
+            self._capture.start(include_microphone=include_microphone)
         except Exception:
             with self._lock:
                 self._state.update(
@@ -146,12 +150,21 @@ class RealtimeTranscriptionService:
                 capture=self._capture,
                 window_seconds=self._window_seconds,
                 overlap_seconds=self._overlap_seconds,
+                sources=(
+                    (SOURCE_SYSTEM, SOURCE_MICROPHONE)
+                    if self._include_microphone
+                    else (SOURCE_SYSTEM,)
+                ),
             )
             with self._lock:
                 self._session = session
                 self._state.update(
                     asr_status="waiting_audio",
-                    asr_message="Ожидаем системный звук и микрофон…",
+                    asr_message=(
+                        "Ожидаем системный звук и микрофон…"
+                        if self._include_microphone
+                        else "Ожидаем системный звук…"
+                    ),
                     device=device,
                 )
 
@@ -169,7 +182,12 @@ class RealtimeTranscriptionService:
                         )
                 self._stop_event.wait(self._poll_interval)
 
-            for source in (SOURCE_SYSTEM, SOURCE_MICROPHONE):
+            sources = (
+                (SOURCE_SYSTEM, SOURCE_MICROPHONE)
+                if self._include_microphone
+                else (SOURCE_SYSTEM,)
+            )
+            for source in sources:
                 while pcm := self._capture.drain_audio(source):
                     session.push(source, pcm)
             self._consume(session.stop())

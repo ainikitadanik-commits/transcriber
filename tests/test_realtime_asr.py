@@ -40,6 +40,17 @@ class FakeCapture:
 
 
 class RealtimeASRTests(unittest.TestCase):
+    def test_session_can_exclude_microphone_source(self):
+        session = RealtimeASRSession(
+            lambda source, pcm, sample_rate: "текст",
+            sources=(SOURCE_SYSTEM,),
+            window_seconds=1,
+            overlap_seconds=0.2,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Неизвестный источник"):
+            session.push(SOURCE_MICROPHONE, b"\x00\x00")
+
     def test_rejects_windows_above_gigaam_short_audio_limit(self):
         with self.assertRaisesRegex(ValueError, "25"):
             RealtimeASRSession(lambda *_args: "", window_seconds=25.1)

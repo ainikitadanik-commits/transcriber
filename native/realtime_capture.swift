@@ -999,7 +999,7 @@ enum RealtimeCapture {
                 runProductApplication()
                 return
             }
-            guard let systemFD, let microphoneFD else {
+            guard let systemFD else {
                 writer.sendFailure(
                     CaptureFailure(
                         source: "lifecycle",
@@ -1012,6 +1012,18 @@ enum RealtimeCapture {
                 Foundation.exit(2)
             }
             if CommandLine.arguments.contains("--self-test") {
+                guard let microphoneFD else {
+                    writer.sendFailure(
+                        CaptureFailure(
+                            source: "lifecycle",
+                            domain: "process.arguments",
+                            code: "invalid_arguments",
+                            nativeCode: 2,
+                            message: "Self-test требует оба PCM-канала."
+                        )
+                    )
+                    Foundation.exit(2)
+                }
                 try runSelfTest(
                     writer: writer,
                     systemFD: systemFD,
@@ -1020,11 +1032,13 @@ enum RealtimeCapture {
                 Foundation.exit(0)
             }
             let termination = TerminationWaiter()
-            let microphoneCapture = MicrophoneCapture(
-                writer: writer,
-                fileDescriptor: microphoneFD
-            ) { failure in
-                termination.finish(with: failure)
+            let microphoneCapture = microphoneFD.map { descriptor in
+                MicrophoneCapture(
+                    writer: writer,
+                    fileDescriptor: descriptor
+                ) { failure in
+                    termination.finish(with: failure)
+                }
             }
             let systemCapture = SystemAudioCapture(
                 writer: writer,
@@ -1033,15 +1047,17 @@ enum RealtimeCapture {
                 termination.finish(with: failure)
             }
 
-            writer.send(
-                "permission_state",
-                extra: ["source": "microphone", "state": "requesting"]
-            )
-            try await microphoneCapture.start()
-            writer.send(
-                "permission_state",
-                extra: ["source": "microphone", "state": "granted"]
-            )
+            if let microphoneCapture {
+                writer.send(
+                    "permission_state",
+                    extra: ["source": "microphone", "state": "requesting"]
+                )
+                try await microphoneCapture.start()
+                writer.send(
+                    "permission_state",
+                    extra: ["source": "microphone", "state": "granted"]
+                )
+            }
             do {
                 writer.send(
                     "permission_state",
@@ -1049,7 +1065,7 @@ enum RealtimeCapture {
                 )
                 try systemCapture.start()
             } catch {
-                microphoneCapture.stop()
+                microphoneCapture?.stop()
                 throw error
             }
             writer.send(
@@ -1063,6 +1079,7 @@ enum RealtimeCapture {
                     "pcm_sample_rate": 16_000,
                     "pcm_channels": 1,
                     "pcm_encoding": "pcm_s16le",
+                    "microphone_enabled": microphoneCapture != nil,
                 ]
             )
 
@@ -1072,7 +1089,7 @@ enum RealtimeCapture {
                 extra: ["source": "lifecycle", "state": "stopping"]
             )
             systemCapture.stop()
-            microphoneCapture.stop()
+            microphoneCapture?.stop()
             if let runtimeFailure {
                 writer.sendFailure(runtimeFailure)
                 Foundation.exit(1)

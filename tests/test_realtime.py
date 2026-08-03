@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from transcriber.realtime import (
     PCMBuffer,
@@ -24,6 +24,8 @@ class RealtimeTests(unittest.TestCase):
         self.assertIn("AudioHardwareDestroyProcessTap", source)
         self.assertIn("final class MicrophoneCapture", source)
         self.assertIn("AVAudioEngine()", source)
+        self.assertIn("guard let systemFD else", source)
+        self.assertIn("let microphoneCapture = microphoneFD.map", source)
         self.assertNotIn("ScreenCaptureKit", source)
         self.assertIn("GET /api/health HTTP/1.0", source)
         self.assertIn('environment["TRANSCRIBER_BUILD_ID"]', source)
@@ -100,6 +102,30 @@ class RealtimeTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "build_realtime_helper"):
                 manager.start()
+
+    def test_system_only_start_does_not_open_microphone_channel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / "realtime-capture"
+            helper.touch()
+            helper.chmod(0o755)
+            process = Mock()
+            process.stdout = []
+            with (
+                patch.dict(os.environ, {"TRANSCRIBER_CAPTURE_HELPER": str(helper)}),
+                patch("transcriber.realtime.os.pipe", return_value=(10, 11)) as pipe,
+                patch("transcriber.realtime.os.close"),
+                patch("transcriber.realtime.subprocess.Popen", return_value=process) as popen,
+                patch("transcriber.realtime.threading.Thread") as thread,
+            ):
+                state = RealtimeCaptureManager().start()
+
+        pipe.assert_called_once_with()
+        command = popen.call_args.args[0]
+        self.assertEqual(command, [str(helper), "--system-fd", "11"])
+        self.assertEqual(popen.call_args.kwargs["pass_fds"], (11,))
+        self.assertEqual(thread.call_count, 3)
+        self.assertFalse(state["microphone_enabled"])
+        self.assertEqual(state["permissions"]["microphone"], "disabled")
 
 
 if __name__ == "__main__":

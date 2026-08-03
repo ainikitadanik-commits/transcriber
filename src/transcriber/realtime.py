@@ -21,6 +21,7 @@ PCM_BUFFER_LIMIT = (
     PCM_SAMPLE_RATE * PCM_CHANNELS * PCM_SAMPLE_WIDTH * PCM_BUFFER_SECONDS
 )
 PERMISSION_STATES = {
+    "disabled",
     "unknown",
     "requesting",
     "granted",
@@ -78,6 +79,7 @@ class RealtimeCaptureManager:
             "message": "Готово к запуску.",
             "system_audio": False,
             "microphone": False,
+            "microphone_enabled": False,
             "permissions": {
                 "system": "unknown",
                 "microphone": "unknown",
@@ -117,7 +119,7 @@ class RealtimeCaptureManager:
         )
         return state
 
-    def start(self) -> dict[str, Any]:
+    def start(self, *, include_microphone: bool = False) -> dict[str, Any]:
         helper = capture_helper_path()
         if not helper.is_file() or not os.access(helper, os.X_OK):
             raise RuntimeError(
@@ -130,12 +132,17 @@ class RealtimeCaptureManager:
                 raise RuntimeError("Рилтайм-захват уже запущен.")
             self._state = {
                 "status": "starting",
-                "message": "Подтвердите доступ к системному звуку и микрофону.",
+                "message": (
+                    "Подтвердите доступ к системному звуку и микрофону."
+                    if include_microphone
+                    else "Подтвердите доступ к системному звуку."
+                ),
                 "system_audio": False,
                 "microphone": False,
+                "microphone_enabled": include_microphone,
                 "permissions": {
                     "system": "requesting",
-                    "microphone": "requesting",
+                    "microphone": "requesting" if include_microphone else "disabled",
                 },
                 "error": None,
             }
@@ -145,25 +152,26 @@ class RealtimeCaptureManager:
                 "microphone": PCMBuffer(),
             }
             system_read, system_write = os.pipe()
-            microphone_read, microphone_write = os.pipe()
+            microphone_read = microphone_write = None
+            command = [str(helper), "--system-fd", str(system_write)]
+            pass_fds = [system_write]
+            if include_microphone:
+                microphone_read, microphone_write = os.pipe()
+                command.extend(["--microphone-fd", str(microphone_write)])
+                pass_fds.append(microphone_write)
             try:
                 self._process = subprocess.Popen(
-                    [
-                        str(helper),
-                        "--system-fd",
-                        str(system_write),
-                        "--microphone-fd",
-                        str(microphone_write),
-                    ],
+                    command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1,
-                    pass_fds=(system_write, microphone_write),
+                    pass_fds=tuple(pass_fds),
                 )
             except OSError as error:
                 os.close(system_read)
-                os.close(microphone_read)
+                if microphone_read is not None:
+                    os.close(microphone_read)
                 self._state.update(
                     status="error",
                     message=f"Не удалось запустить локальный помощник: {error}",
@@ -171,7 +179,8 @@ class RealtimeCaptureManager:
                 raise RuntimeError(self._state["message"]) from error
             finally:
                 os.close(system_write)
-                os.close(microphone_write)
+                if microphone_write is not None:
+                    os.close(microphone_write)
             process = self._process
 
         threading.Thread(
@@ -179,11 +188,12 @@ class RealtimeCaptureManager:
             args=(process, "system", system_read),
             daemon=True,
         ).start()
-        threading.Thread(
-            target=self._read_pcm,
-            args=(process, "microphone", microphone_read),
-            daemon=True,
-        ).start()
+        if microphone_read is not None:
+            threading.Thread(
+                target=self._read_pcm,
+                args=(process, "microphone", microphone_read),
+                daemon=True,
+            ).start()
         threading.Thread(
             target=self._read_events, args=(process,), daemon=True
         ).start()
@@ -248,9 +258,16 @@ class RealtimeCaptureManager:
                 if process is not self._process:
                     return
                 if event_name == "started":
+                    microphone_enabled = bool(
+                        self._state.get("microphone_enabled", False)
+                    )
                     self._state.update(
                         status="recording",
-                        message="Захватываем системный звук и микрофон локально.",
+                        message=(
+                            "Захватываем системный звук и микрофон локально."
+                            if microphone_enabled
+                            else "Захватываем только системный звук локально."
+                        ),
                     )
                     permissions = dict(self._state["permissions"])
                     for source in ("system", "microphone"):

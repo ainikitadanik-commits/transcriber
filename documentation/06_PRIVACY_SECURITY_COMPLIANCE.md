@@ -71,7 +71,8 @@ diarization:
 
 Internal candidate реализует:
 
-- microphone — для голоса пользователя;
+- microphone — опционально для голоса пользователя, выключен по умолчанию и
+  не открывается native helper без явного выбора пользователя;
 - system audio — через private Core Audio Tap без Screen Recording.
 
 Core Audio Tap и отдельный microphone-контур реализованы, но ещё не прошли

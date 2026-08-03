@@ -169,7 +169,7 @@
             <div>
               <p class="eyebrow">Живая встреча</p>
               <h2>Транскрибация в реальном времени</h2>
-              <p>Системный звук и микрофон распознаются локально с небольшой задержкой.</p>
+              <p>Системный звук распознаётся локально с небольшой задержкой. Ваш микрофон можно добавить отдельно.</p>
             </div>
             <span class="live-state planned" id="live-state" role="status" aria-live="polite">Готово к встрече</span>
           </div>
@@ -177,12 +177,23 @@
           <div class="live-meter" aria-label="Продолжительность захвата">
             <span class="live-dot" aria-hidden="true"></span>
             <time id="live-timer" datetime="PT0S">00:00:00</time>
-            <span>Системный звук + микрофон</span>
+            <span id="live-source-summary">Только системный звук</span>
+          </div>
+
+          <div class="speaker-option live-microphone-option">
+            <label class="speaker-toggle" for="live-include-microphone">
+              <input id="live-include-microphone" type="checkbox">
+              <span class="switch" aria-hidden="true"></span>
+              <span class="speaker-copy">
+                <strong>Добавлять мой микрофон</strong>
+                <small>Выключено по умолчанию: mute внутри ВКС нельзя определить универсально.</small>
+              </span>
+            </label>
           </div>
 
           <div class="live-sources" aria-label="Состояние источников звука">
             <span id="system-audio-state">Системный звук: ожидаем</span>
-            <span id="microphone-state">Микрофон: ожидаем</span>
+            <span id="microphone-state">Микрофон: выключен</span>
             <span class="audio-format">PCM 16 кГц · mono</span>
           </div>
 
