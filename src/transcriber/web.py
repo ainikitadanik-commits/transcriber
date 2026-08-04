@@ -300,11 +300,21 @@ def realtime_status():
 def realtime_start():
     payload = request.get_json(silent=True) or {}
     include_microphone = payload.get("include_microphone", False)
+    diarization = payload.get("diarization", False)
+    hf_token = payload.get("hf_token") or None
     if not isinstance(include_microphone, bool):
         return jsonify(error="Параметр include_microphone должен быть boolean."), 400
+    if not isinstance(diarization, bool):
+        return jsonify(error="Параметр diarization должен быть boolean."), 400
+    if hf_token is not None and not isinstance(hf_token, str):
+        return jsonify(error="Параметр hf_token должен быть строкой."), 400
     try:
         return jsonify(
-            realtime_service.start(include_microphone=include_microphone)
+            realtime_service.start(
+                include_microphone=include_microphone,
+                diarization=diarization,
+                hf_token=hf_token.strip() if hf_token else None,
+            )
         ), 202
     except RuntimeError as error:
         return jsonify(error=str(error)), 409

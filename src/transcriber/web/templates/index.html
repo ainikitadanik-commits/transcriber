@@ -177,7 +177,7 @@
           <div class="live-meter" aria-label="Продолжительность захвата">
             <span class="live-dot" aria-hidden="true"></span>
             <time id="live-timer" datetime="PT0S">00:00:00</time>
-            <span id="live-source-summary">Только системный звук</span>
+            <span id="live-source-summary">Системный звук · спикеры включены</span>
           </div>
 
           <div class="speaker-option live-microphone-option">
@@ -190,6 +190,26 @@
               </span>
             </label>
           </div>
+
+          <div class="speaker-option live-diarization-option">
+            <label class="speaker-toggle" for="live-diarization">
+              <input id="live-diarization" type="checkbox" checked>
+              <span class="switch" aria-hidden="true"></span>
+              <span class="speaker-copy">
+                <strong>Разделять участников встречи</strong>
+                <small>Акустически определяет голоса в системном звуке и подписывает их «Спикер 1», «Спикер 2»…</small>
+              </span>
+            </label>
+          </div>
+
+          <details class="token-box live-token-box">
+            <summary>Токен модели спикеров — только для первого запуска</summary>
+            <div class="token-content">
+              <label for="live-hf-token">Hugging Face token</label>
+              <input id="live-hf-token" type="password" autocomplete="off" placeholder="hf_••••••••">
+              <small>Сначала примите условия <a href="https://huggingface.co/pyannote/segmentation-3.0" target="_blank" rel="noreferrer">segmentation‑3.0</a> и <a href="https://huggingface.co/pyannote/speaker-diarization-community-1" target="_blank" rel="noreferrer">Community‑1</a>. Read token нужен один раз и не сохраняется; после загрузки всё работает локально.</small>
+            </div>
+          </details>
 
           <div class="live-sources" aria-label="Состояние источников звука">
             <span id="system-audio-state">Системный звук: ожидаем</span>

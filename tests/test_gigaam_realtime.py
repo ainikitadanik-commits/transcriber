@@ -35,12 +35,13 @@ class GigaAMRealtimeTests(unittest.TestCase):
         model = FakeRealtimeModel()
         adapter = GigaAMInMemoryAdapter(model)
 
-        text = adapter("system", b"\0\0" * 16_000, 16_000)
+        result = adapter("system", b"\0\0" * 16_000, 16_000)
 
-        self.assertEqual(text, "распознанный текст")
+        self.assertEqual(result.text, "распознанный текст")
+        self.assertEqual(result.words, ())
         self.assertEqual(tuple(model.waveform.shape), (1, 16_000))
         self.assertEqual(int(model.length.item()), 16_000)
-        self.assertFalse(model.decode_args[-1])
+        self.assertTrue(model.decode_args[-1])
 
     def test_adapter_enforces_pcm_contract_and_short_window(self):
         adapter = GigaAMInMemoryAdapter(FakeRealtimeModel())

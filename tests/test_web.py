@@ -151,7 +151,9 @@ class WebTests(unittest.TestCase):
 
         self.assertEqual(start_response.status_code, 202)
         self.assertEqual(stop_response.status_code, 202)
-        start_mock.assert_called_once_with(include_microphone=False)
+        start_mock.assert_called_once_with(
+            include_microphone=False, diarization=False, hf_token=None
+        )
         stop_mock.assert_called_once_with()
 
     def test_realtime_start_can_explicitly_include_microphone(self):
@@ -166,7 +168,27 @@ class WebTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 202)
-        start_mock.assert_called_once_with(include_microphone=True)
+        start_mock.assert_called_once_with(
+            include_microphone=True, diarization=False, hf_token=None
+        )
+
+    def test_realtime_start_enables_local_speaker_diarization(self):
+        with patch.object(
+            web.realtime_service,
+            "start",
+            return_value={"status": "starting", "asr_status": "loading"},
+        ) as start_mock:
+            response = self.client.post(
+                "/api/realtime/start",
+                json={"diarization": True, "hf_token": "  hf_test  "},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        start_mock.assert_called_once_with(
+            include_microphone=False,
+            diarization=True,
+            hf_token="hf_test",
+        )
 
     def test_realtime_start_rejects_non_boolean_microphone_option(self):
         response = self.client.post(

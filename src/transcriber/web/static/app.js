@@ -24,6 +24,8 @@ const livePause = document.querySelector("#live-pause");
 const liveStop = document.querySelector("#live-stop");
 const liveNotice = document.querySelector("#live-notice");
 const liveIncludeMicrophone = document.querySelector("#live-include-microphone");
+const liveDiarization = document.querySelector("#live-diarization");
+const liveHfToken = document.querySelector("#live-hf-token");
 const liveSourceSummary = document.querySelector("#live-source-summary");
 const systemAudioState = document.querySelector("#system-audio-state");
 const microphoneState = document.querySelector("#microphone-state");
@@ -93,7 +95,7 @@ function createRealtimeSegment(segment, provisional = false) {
 
   const meta = document.createElement("div");
   meta.className = "live-segment-meta";
-  const source = realtimeSourceLabels[segment.source] || "Аудио";
+  const source = segment.speaker || realtimeSourceLabels[segment.source] || "Аудио";
   meta.textContent = `${source} · ${formatSegmentTime(segment.start)}`;
   if (provisional) {
     const draft = document.createElement("span");
@@ -175,6 +177,9 @@ function renderRealtime(state) {
   const microphoneEnabled = active
     ? Boolean(state.microphone_enabled)
     : liveIncludeMicrophone.checked;
+  const diarizationEnabled = active
+    ? Boolean(state.diarization_enabled)
+    : liveDiarization.checked;
   setTextIfChanged(liveState, stateLabel);
   liveState.classList.toggle("planned", state.asr_status === "idle" && state.status === "idle");
   liveState.classList.toggle("recording", state.asr_status === "running");
@@ -197,11 +202,13 @@ function renderRealtime(state) {
   );
   setTextIfChanged(
     liveSourceSummary,
-    microphoneEnabled ? "Системный звук + микрофон" : "Только системный звук",
+    `${microphoneEnabled ? "Системный звук + микрофон" : "Системный звук"}${diarizationEnabled ? " · спикеры включены" : ""}`,
   );
   systemAudioState.classList.toggle("active", Boolean(state.system_audio));
   microphoneState.classList.toggle("active", Boolean(state.microphone));
   liveIncludeMicrophone.disabled = active;
+  liveDiarization.disabled = active;
+  liveHfToken.disabled = active;
   liveStart.disabled = !state.available || active;
   livePause.disabled = true;
   liveStop.disabled = !active;
@@ -236,9 +243,14 @@ liveStart.addEventListener("click", async () => {
     const response = await fetch("/api/realtime/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ include_microphone: liveIncludeMicrophone.checked }),
+      body: JSON.stringify({
+        include_microphone: liveIncludeMicrophone.checked,
+        diarization: liveDiarization.checked,
+        hf_token: liveHfToken.value,
+      }),
     });
     const data = await response.json();
+    liveHfToken.value = "";
     if (!response.ok) throw new Error(data.error || "Не удалось начать встречу.");
     renderRealtime(data);
   } catch (error) {

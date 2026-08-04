@@ -15,7 +15,15 @@ SOURCES = (SOURCE_SYSTEM, SOURCE_MICROPHONE)
 
 
 class InMemoryASR(Protocol):
-    def __call__(self, source: str, pcm: bytes, sample_rate: int) -> str: ...
+    def __call__(
+        self, source: str, pcm: bytes, sample_rate: int
+    ) -> str | RealtimeASRResult: ...
+
+
+class InMemoryDiarizer(Protocol):
+    def __call__(
+        self, source: str, pcm: bytes, sample_rate: int
+    ) -> tuple[RealtimeSpeakerTurn, ...]: ...
 
 
 class CaptureSource(Protocol):
@@ -27,12 +35,33 @@ class BackpressureError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class RealtimeWord:
+    start: float
+    end: float
+    text: str
+
+
+@dataclass(frozen=True)
+class RealtimeASRResult:
+    text: str
+    words: tuple[RealtimeWord, ...] = ()
+
+
+@dataclass(frozen=True)
+class RealtimeSpeakerTurn:
+    start: float
+    end: float
+    speaker: str
+
+
+@dataclass(frozen=True)
 class RealtimeSegment:
     source: str
     start: float
     end: float
     text: str
     committed: bool
+    speaker: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,7 +78,15 @@ class _SourceState:
     pcm: bytearray = field(default_factory=bytearray)
     buffer_start_samples: int = 0
     last_window_end_samples: int = 0
-    provisional: RealtimeSegment | None = None
+    provisional: tuple[_LiveToken, ...] = ()
+
+
+@dataclass(frozen=True)
+class _LiveToken:
+    text: str
+    start: float
+    end: float
+    speaker: str | None = None
 
 
 def _token_key(token: str) -> str:
@@ -71,6 +108,7 @@ class RealtimeASRSession:
         self,
         asr: InMemoryASR,
         *,
+        diarizer: InMemoryDiarizer | None = None,
         capture: CaptureSource | None = None,
         window_seconds: float = 20.0,
         overlap_seconds: float = 2.0,
@@ -95,6 +133,7 @@ class RealtimeASRSession:
             raise ValueError("Источники ASR должны быть уникальным непустым набором.")
 
         self._asr = asr
+        self._diarizer = diarizer
         self._capture = capture
         self._window_samples = round(window_seconds * PCM_SAMPLE_RATE)
         self._overlap_samples = round(overlap_seconds * PCM_SAMPLE_RATE)
@@ -179,34 +218,18 @@ class RealtimeASRSession:
                     state,
                     state.buffer_start_samples,
                     buffer_end,
-                    self._asr(source, bytes(state.pcm), PCM_SAMPLE_RATE),
+                    *self._process_audio(source, bytes(state.pcm)),
                 )
             state.pcm.clear()
             state.buffer_start_samples = buffer_end
 
-        provisionals = sorted(
-            (
-                state.provisional
-                for state in self._sources.values()
-                if state.provisional is not None
-            ),
-            key=lambda segment: (
-                segment.start,
-                segment.end,
-                self._source_order.index(segment.source),
-            ),
-        )
-        for segment in provisionals:
-            self._append_committed(
-                RealtimeSegment(
-                    source=segment.source,
-                    start=segment.start,
-                    end=segment.end,
-                    text=segment.text,
-                    committed=True,
-                )
-            )
-            self._sources[segment.source].provisional = None
+        for source in self._source_order:
+            state = self._sources[source]
+            for segment in self._segments_from_tokens(
+                source, state.provisional, committed=True
+            ):
+                self._append_committed(segment)
+            state.provisional = ()
 
         self._finalized = True
         return self.snapshot()
@@ -217,11 +240,14 @@ class RealtimeASRSession:
         return committed
 
     def snapshot(self) -> RealtimeSnapshot:
-        provisional = {
-            source: state.provisional
-            for source, state in self._sources.items()
-            if state.provisional is not None
-        }
+        provisional: dict[str, RealtimeSegment] = {}
+        for source in self._source_order:
+            segments = self._segments_from_tokens(
+                source, self._sources[source].provisional, committed=False
+            )
+            for index, segment in enumerate(segments):
+                key = source if len(segments) == 1 else f"{source}:{index}"
+                provisional[key] = segment
         buffered_seconds = {
             source: len(state.pcm) / (PCM_SAMPLE_RATE * PCM_SAMPLE_WIDTH)
             for source, state in self._sources.items()
@@ -243,12 +269,10 @@ class RealtimeASRSession:
         self._ensure_commit_capacity(state)
         start = state.buffer_start_samples
         end = start + self._window_samples
-        text = self._asr(
-            source,
-            bytes(state.pcm[: self._window_bytes]),
-            PCM_SAMPLE_RATE,
+        result, turns = self._process_audio(
+            source, bytes(state.pcm[: self._window_bytes])
         )
-        self._accept_result(source, state, start, end, text)
+        self._accept_result(source, state, start, end, result, turns)
         del state.pcm[: self._step_bytes]
         state.buffer_start_samples += self._step_samples
 
@@ -258,37 +282,135 @@ class RealtimeASRSession:
         state: _SourceState,
         start_samples: int,
         end_samples: int,
-        text: str,
+        result: str | RealtimeASRResult,
+        turns: tuple[RealtimeSpeakerTurn, ...],
     ) -> None:
-        tokens = text.split()
+        tokens = self._result_tokens(result, start_samples, end_samples, turns)
         previous = state.provisional
-        if previous is not None:
-            previous_tokens = previous.text.split()
-            overlap = longest_token_overlap(previous_tokens, tokens)
-            stable_tokens = previous_tokens[:-overlap] if overlap else previous_tokens
+        if previous:
+            overlap = longest_token_overlap(
+                [token.text for token in previous],
+                [token.text for token in tokens],
+            )
+            stable_tokens = previous[:-overlap] if overlap else previous
             if stable_tokens:
-                self._append_committed(
-                    RealtimeSegment(
-                        source=source,
-                        start=previous.start,
-                        end=start_samples / PCM_SAMPLE_RATE,
-                        text=" ".join(stable_tokens),
-                        committed=True,
-                    )
-                )
+                for segment in self._segments_from_tokens(
+                    source, stable_tokens, committed=True
+                ):
+                    self._append_committed(segment)
 
-        state.provisional = (
+        state.provisional = tokens
+        state.last_window_end_samples = end_samples
+
+    def _process_audio(
+        self, source: str, pcm: bytes
+    ) -> tuple[str | RealtimeASRResult, tuple[RealtimeSpeakerTurn, ...]]:
+        result = self._asr(source, pcm, PCM_SAMPLE_RATE)
+        turns = (
+            self._diarizer(source, pcm, PCM_SAMPLE_RATE)
+            if self._diarizer is not None and source == SOURCE_SYSTEM
+            else ()
+        )
+        return result, turns
+
+    @staticmethod
+    def _speaker_for(
+        start: float,
+        end: float,
+        turns: tuple[RealtimeSpeakerTurn, ...],
+    ) -> str | None:
+        if not turns:
+            return None
+        best = max(
+            turns,
+            key=lambda turn: max(
+                0.0, min(end, turn.end) - max(start, turn.start)
+            ),
+        )
+        overlap = max(0.0, min(end, best.end) - max(start, best.start))
+        if overlap > 0:
+            return best.speaker
+        midpoint = (start + end) / 2
+        nearest = min(
+            turns,
+            key=lambda turn: min(
+                abs(midpoint - turn.start), abs(midpoint - turn.end)
+            ),
+        )
+        return nearest.speaker
+
+    def _result_tokens(
+        self,
+        result: str | RealtimeASRResult,
+        start_samples: int,
+        end_samples: int,
+        turns: tuple[RealtimeSpeakerTurn, ...],
+    ) -> tuple[_LiveToken, ...]:
+        window_start = start_samples / PCM_SAMPLE_RATE
+        window_end = end_samples / PCM_SAMPLE_RATE
+        if isinstance(result, RealtimeASRResult) and result.words:
+            return tuple(
+                _LiveToken(
+                    text=word.text,
+                    start=window_start + word.start,
+                    end=window_start + word.end,
+                    speaker=self._speaker_for(word.start, word.end, turns),
+                )
+                for word in result.words
+                if word.text.strip()
+            )
+        text = result.text if isinstance(result, RealtimeASRResult) else result
+        words = text.split()
+        if not words:
+            return ()
+        duration = max(0.0, window_end - window_start)
+        return tuple(
+            _LiveToken(
+                text=word,
+                start=window_start + duration * index / len(words),
+                end=window_start + duration * (index + 1) / len(words),
+            )
+            for index, word in enumerate(words)
+        )
+
+    @staticmethod
+    def _join_tokens(tokens: tuple[_LiveToken, ...]) -> str:
+        text = " ".join(token.text for token in tokens)
+        text = re.sub(r"\s+([,.;:!?%…»)])", r"\1", text)
+        return re.sub(r"([«(])\s+", r"\1", text).strip()
+
+    def _segments_from_tokens(
+        self,
+        source: str,
+        tokens: tuple[_LiveToken, ...],
+        *,
+        committed: bool,
+    ) -> tuple[RealtimeSegment, ...]:
+        if not tokens:
+            return ()
+        groups: list[list[_LiveToken]] = []
+        for token in tokens:
+            if groups and (
+                token.speaker != groups[-1][-1].speaker
+                or token.start - groups[-1][-1].end > 0.7
+                or re.search(r"[.!?…][»\"']?$", groups[-1][-1].text)
+                or groups[-1][-1].end - groups[-1][0].start >= 18.0
+            ):
+                groups.append([])
+            if not groups:
+                groups.append([])
+            groups[-1].append(token)
+        return tuple(
             RealtimeSegment(
                 source=source,
-                start=start_samples / PCM_SAMPLE_RATE,
-                end=end_samples / PCM_SAMPLE_RATE,
-                text=" ".join(tokens),
-                committed=False,
+                start=group[0].start,
+                end=group[-1].end,
+                text=self._join_tokens(tuple(group)),
+                committed=committed,
+                speaker=group[0].speaker,
             )
-            if tokens
-            else None
+            for group in groups
         )
-        state.last_window_end_samples = end_samples
 
     def _next_ready_source(self, *, peek: bool = False) -> str | None:
         for offset in range(len(self._source_order)):
@@ -308,7 +430,7 @@ class RealtimeASRSession:
 
     def _ensure_commit_capacity(self, state: _SourceState) -> None:
         if (
-            state.provisional is not None
+            state.provisional
             and len(self._committed) >= self._max_pending_segments
         ):
             raise BackpressureError(

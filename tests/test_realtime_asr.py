@@ -2,7 +2,10 @@ import unittest
 
 from transcriber.realtime_asr import (
     BackpressureError,
+    RealtimeASRResult,
     RealtimeASRSession,
+    RealtimeSpeakerTurn,
+    RealtimeWord,
     SOURCE_MICROPHONE,
     SOURCE_SYSTEM,
     longest_token_overlap,
@@ -147,6 +150,41 @@ class RealtimeASRTests(unittest.TestCase):
             1,
         )
         self.assertEqual(longest_token_overlap(["а", "б"], ["в", "г"]), 0)
+
+    def test_word_timestamps_split_system_audio_by_realtime_speaker(self):
+        result = RealtimeASRResult(
+            text="добрый день коллеги",
+            words=(
+                RealtimeWord(0.1, 0.4, "добрый"),
+                RealtimeWord(0.4, 0.8, "день"),
+                RealtimeWord(1.1, 1.5, "коллеги"),
+            ),
+        )
+        diarizer_calls = []
+
+        def diarizer(source, pcm, sample_rate):
+            diarizer_calls.append((source, len(pcm), sample_rate))
+            return (
+                RealtimeSpeakerTurn(0.0, 0.9, "Спикер 1"),
+                RealtimeSpeakerTurn(0.9, 2.0, "Спикер 2"),
+            )
+
+        session = RealtimeASRSession(
+            lambda *_args: result,
+            diarizer=diarizer,
+            sources=(SOURCE_SYSTEM,),
+            window_seconds=2.0,
+            overlap_seconds=0.2,
+        )
+        session.push(SOURCE_SYSTEM, silent_pcm(2.0))
+
+        snapshot = session.process_ready(max_windows=1)
+
+        self.assertEqual(
+            [(segment.speaker, segment.text) for segment in snapshot.provisional.values()],
+            [("Спикер 1", "добрый день"), ("Спикер 2", "коллеги")],
+        )
+        self.assertEqual(diarizer_calls, [(SOURCE_SYSTEM, 64_000, SAMPLE_RATE)])
 
     def test_push_applies_backpressure_without_mutating_buffer(self):
         session = RealtimeASRSession(

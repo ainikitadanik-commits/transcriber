@@ -4,7 +4,12 @@ import threading
 from typing import Any
 
 from .core import MODEL_NAME, load_model
-from .realtime_asr import MAX_WINDOW_SECONDS, PCM_SAMPLE_RATE
+from .realtime_asr import (
+    MAX_WINDOW_SECONDS,
+    PCM_SAMPLE_RATE,
+    RealtimeASRResult,
+    RealtimeWord,
+)
 
 
 class GigaAMInMemoryAdapter:
@@ -17,7 +22,7 @@ class GigaAMInMemoryAdapter:
                     f"Закреплённая GigaAM-модель не поддерживает {attribute}."
                 )
 
-    def __call__(self, source: str, pcm: bytes, sample_rate: int) -> str:
+    def __call__(self, source: str, pcm: bytes, sample_rate: int) -> RealtimeASRResult:
         del source
         if sample_rate != PCM_SAMPLE_RATE:
             raise ValueError("GigaAM realtime принимает только PCM 16 кГц.")
@@ -27,7 +32,7 @@ class GigaAMInMemoryAdapter:
         if sample_count > MAX_WINDOW_SECONDS * sample_rate:
             raise ValueError("Realtime-окно превышает лимит GigaAM 25 секунд.")
         if not pcm:
-            return ""
+            return RealtimeASRResult("")
 
         import torch
 
@@ -46,13 +51,24 @@ class GigaAMInMemoryAdapter:
         )
         with self._lock, torch.inference_mode():
             encoded, encoded_length = self._model.forward(waveform, length)
-            text, _words = self._model._decode(
+            text, words = self._model._decode(
                 encoded,
                 encoded_length,
                 length,
-                False,
+                True,
             )[0]
-        return str(text).strip()
+        return RealtimeASRResult(
+            text=str(text).strip(),
+            words=tuple(
+                RealtimeWord(
+                    start=float(word.start),
+                    end=float(word.end),
+                    text=str(word.text).strip(),
+                )
+                for word in (words or [])
+                if str(word.text).strip()
+            ),
+        )
 
 
 def load_realtime_adapter(

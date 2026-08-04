@@ -1,9 +1,15 @@
+import json
 import tempfile
 import time
 import unittest
 from pathlib import Path
 
 from transcriber.realtime_service import RealtimeTranscriptionService
+from transcriber.realtime_asr import (
+    RealtimeASRResult,
+    RealtimeSpeakerTurn,
+    RealtimeWord,
+)
 
 
 class FakeCapture:
@@ -139,6 +145,57 @@ class RealtimeServiceTests(unittest.TestCase):
 
         self.assertEqual(state["asr_status"], "error")
         self.assertGreaterEqual(capture.stop_calls, 1)
+
+    def test_realtime_diarization_labels_live_segments_and_export(self):
+        capture = FakeCapture(b"\x01\x00" * 16_000)
+        loader_calls = []
+
+        def adapter(_source, _pcm, _sample_rate):
+            return RealtimeASRResult(
+                "первая вторая",
+                (
+                    RealtimeWord(0.05, 0.2, "первая"),
+                    RealtimeWord(0.25, 0.45, "вторая"),
+                ),
+            )
+
+        def load_diarizer(device, token):
+            loader_calls.append((device, token))
+            return lambda _source, _pcm, _sample_rate: (
+                RealtimeSpeakerTurn(0.0, 0.22, "Спикер 1"),
+                RealtimeSpeakerTurn(0.22, 0.5, "Спикер 2"),
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            service = RealtimeTranscriptionService(
+                capture,
+                output_dir,
+                adapter_loader=lambda: (adapter, "cpu"),
+                diarizer_loader=load_diarizer,
+                window_seconds=0.5,
+                overlap_seconds=0.1,
+                poll_interval=0.01,
+            )
+            service.start(diarization=True, hf_token="hf_test")
+            deadline = time.monotonic() + 2
+            while not service.snapshot()["segments"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            service.stop()
+            self.assertTrue(service.wait(2))
+            final = service.snapshot()
+            document = json.loads((output_dir / final["json_name"]).read_text())
+
+        self.assertEqual(loader_calls, [("cpu", "hf_test")])
+        self.assertEqual(
+            {segment["speaker"] for segment in final["segments"]},
+            {"Спикер 1", "Спикер 2"},
+        )
+        self.assertTrue(document["processing"]["diarization"]["enabled"])
+        self.assertEqual(
+            {segment["speaker"] for segment in document["segments"]},
+            {"Спикер 1", "Спикер 2"},
+        )
 
 
 if __name__ == "__main__":

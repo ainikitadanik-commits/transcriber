@@ -1,7 +1,7 @@
 # Product readiness health-check
 
 Статус: internal candidate, внешний release `NO-GO`
-Дата проверки: 2026-07-29
+Дата проверки: 2026-08-04
 Source state: `codex/product-app-release`; точный immutable commit будет записан
 в manifest финального DMG
 Целевая версия: product `.app` 0.2.x
@@ -21,10 +21,11 @@ acceptance. Наличие кода, unit tests и ad-hoc `.app` эти P0 не 
 
 | Gate | Результат |
 | --- | --- |
-| Automated suite | PASS, 72/72 |
+| Automated suite | PASS, 83/83 |
 | Frozen runtime identity | PASS: `/api/health` возвращает точные `build_id` и `instance_id` |
 | Offline bundled GigaAM file ASR | PASS |
 | Realtime core/API/UI/export | IMPLEMENTED, automated tests PASS |
+| Realtime anonymous speaker diarization | IMPLEMENTED, real-meeting quality benchmark pending |
 | Live signed system+mic TCC | UNKNOWN |
 | Mach-O compatibility audit | PASS: 417 Mach-O, arm64, minOS <= 15 |
 | Product FFmpeg | PASS: LGPL, network disabled, required filters/muxer/protocols |
@@ -53,6 +54,12 @@ AVAudioEngine microphone-контур, bounded PCM buffers, window scheduler,
 локальный GigaAM adapter, overlap dedup, API/UI state и TXT/JSON/DOCX export.
 Исходный realtime PCM не должен записываться на диск.
 
+Опциональная realtime-diarization использует word timestamps GigaAM,
+exclusive speaker turns и embeddings pyannote Community-1. Она акустически
+разделяет системный звук на анонимные `Спикер N` без интеграции с ВКС и не
+изменяет аудиовход ASR. Unit и service/export contracts подтверждены; реальная
+точность labels, перебивания и дополнительная latency ещё требуют acceptance.
+
 Это не является realtime product acceptance. [ADR-013](11_ARCHITECTURE_DECISIONS.md)
 остаётся `Proposed`, пока на целевом подписанном `.app` не подтверждены:
 
@@ -62,6 +69,8 @@ AVAudioEngine microphone-контур, bounded PCM buffers, window scheduler,
 4. cleanup tap/aggregate device после Stop/Quit и 30-минутной сессии;
 5. permission continuity после restart/update с той же Developer ID identity;
 6. built-in output, наушники, Teams/Zoom/browser и реальный MDM denial.
+7. устойчивые `Спикер N` на контрольной встрече с 2–6 участниками, сменой
+   очередности и короткими перебиваниями.
 
 ## External P0
 

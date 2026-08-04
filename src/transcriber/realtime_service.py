@@ -9,6 +9,7 @@ from typing import Any, Callable
 from .core import Segment, build_txt, choose_device, write_outputs
 from .gigaam_realtime import load_realtime_adapter
 from .realtime import RealtimeCaptureManager
+from .realtime_diarization import load_realtime_diarizer
 from .realtime_asr import (
     SOURCE_MICROPHONE,
     SOURCE_SYSTEM,
@@ -17,12 +18,17 @@ from .realtime_asr import (
 )
 
 
-AdapterLoader = Callable[[], tuple[Callable[[str, bytes, int], str], str]]
+AdapterLoader = Callable[[], tuple[Callable, str]]
+DiarizerLoader = Callable[[str, str | None], Callable]
 
 
 def _default_adapter_loader():
     device = choose_device("auto")
     return load_realtime_adapter(device), device
+
+
+def _default_diarizer_loader(device: str, token: str | None):
+    return load_realtime_diarizer(device, token=token)
 
 
 class RealtimeTranscriptionService:
@@ -32,6 +38,7 @@ class RealtimeTranscriptionService:
         output_dir: Path,
         *,
         adapter_loader: AdapterLoader = _default_adapter_loader,
+        diarizer_loader: DiarizerLoader = _default_diarizer_loader,
         window_seconds: float = 12.0,
         overlap_seconds: float = 2.0,
         poll_interval: float = 0.25,
@@ -39,6 +46,7 @@ class RealtimeTranscriptionService:
         self._capture = capture
         self._output_dir = output_dir
         self._adapter_loader = adapter_loader
+        self._diarizer_loader = diarizer_loader
         self._window_seconds = window_seconds
         self._overlap_seconds = overlap_seconds
         self._poll_interval = poll_interval
@@ -46,6 +54,8 @@ class RealtimeTranscriptionService:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._include_microphone = False
+        self._diarization = False
+        self._hf_token: str | None = None
         self._session: RealtimeASRSession | None = None
         self._segments: list[RealtimeSegment] = []
         self._provisional: dict[str, RealtimeSegment] = {}
@@ -60,9 +70,16 @@ class RealtimeTranscriptionService:
             "docx_name": None,
             "error": None,
             "microphone_enabled": False,
+            "diarization_enabled": False,
         }
 
-    def start(self, *, include_microphone: bool = False) -> dict[str, Any]:
+    def start(
+        self,
+        *,
+        include_microphone: bool = False,
+        diarization: bool = False,
+        hf_token: str | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             if self._thread and self._thread.is_alive():
                 raise RuntimeError("Realtime-транскрибация уже запущена.")
@@ -70,6 +87,8 @@ class RealtimeTranscriptionService:
             self._provisional = {}
             self._session = None
             self._include_microphone = include_microphone
+            self._diarization = diarization
+            self._hf_token = hf_token
             self._stop_event.clear()
             self._state = {
                 "asr_status": "loading",
@@ -82,6 +101,7 @@ class RealtimeTranscriptionService:
                 "docx_name": None,
                 "error": None,
                 "microphone_enabled": include_microphone,
+                "diarization_enabled": diarization,
             }
 
         try:
@@ -137,16 +157,24 @@ class RealtimeTranscriptionService:
             self._segment_payload(segment) for segment in committed
         ]
         state["provisional"] = {
-            source: self._segment_payload(segment)
-            for source, segment in provisional.items()
+            key: self._segment_payload(segment)
+            for key, segment in provisional.items()
         }
         return state
 
     def _run(self) -> None:
         try:
             adapter, device = self._adapter_loader()
+            hf_token = self._hf_token
+            self._hf_token = None
+            diarizer = (
+                self._diarizer_loader(device, hf_token)
+                if self._diarization
+                else None
+            )
             session = RealtimeASRSession(
                 adapter,
+                diarizer=diarizer,
                 capture=self._capture,
                 window_seconds=self._window_seconds,
                 overlap_seconds=self._overlap_seconds,
@@ -193,6 +221,7 @@ class RealtimeTranscriptionService:
             self._consume(session.stop())
             self._export(device)
         except Exception as error:
+            self._hf_token = None
             try:
                 self._capture.stop()
             except Exception:
@@ -225,7 +254,7 @@ class RealtimeTranscriptionService:
                 start=segment.start,
                 end=segment.end,
                 text=segment.text,
-                speaker=(
+                speaker=segment.speaker or (
                     "Системный звук"
                     if segment.source == SOURCE_SYSTEM
                     else "Микрофон"
@@ -259,9 +288,13 @@ class RealtimeTranscriptionService:
                     "enhancement_applied": False,
                 },
                 "diarization": {
-                    "enabled": False,
-                    "model": None,
-                    "device_used": None,
+                    "enabled": self._diarization,
+                    "model": (
+                        "pyannote/speaker-diarization-community-1"
+                        if self._diarization
+                        else None
+                    ),
+                    "device_used": device if self._diarization else None,
                     "num_speakers_requested": None,
                     "num_speakers": None,
                 },
@@ -314,4 +347,5 @@ class RealtimeTranscriptionService:
             "end": round(segment.end, 3),
             "text": segment.text,
             "committed": segment.committed,
+            "speaker": segment.speaker,
         }
