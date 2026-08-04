@@ -33,6 +33,10 @@ class RealtimeTests(unittest.TestCase):
         self.assertIn('appendingPathComponent("runtime-instance.json")', source)
         self.assertIn('expectedPID.map { payload?["pid"]', source)
         self.assertIn("removeRuntimeMarker(ifMatching:", source)
+        self.assertIn("ProcessInfo.processInfo.beginActivity", source)
+        self.assertIn(".idleSystemSleepDisabled", source)
+        self.assertIn(".suddenTerminationDisabled", source)
+        self.assertIn("ProcessInfo.processInfo.endActivity", source)
         self.assertNotIn('text.contains("\\"audio_format\\"")', source)
         for field in (
             '"source"',

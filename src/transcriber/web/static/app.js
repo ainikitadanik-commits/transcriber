@@ -262,6 +262,7 @@ liveStart.addEventListener("click", async () => {
 });
 
 liveStop.addEventListener("click", async () => {
+  if (!window.confirm("Завершить встречу и сохранить транскрипцию?")) return;
   liveStop.disabled = true;
   try {
     const response = await fetch("/api/realtime/stop", { method: "POST" });
@@ -275,6 +276,15 @@ liveStop.addEventListener("click", async () => {
 
 refreshRealtimeStatus();
 setInterval(refreshRealtimeStatus, 1500);
+
+// Realtime-сессия принадлежит локальному backend, а не браузерной вкладке.
+// После фонового режима браузер может задержать таймеры, поэтому при возврате
+// сразу восстанавливаем фактическое состояние и прошедшее время с backend.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshRealtimeStatus();
+});
+window.addEventListener("focus", refreshRealtimeStatus);
+window.addEventListener("pageshow", refreshRealtimeStatus);
 
 const stageCaps = {
   uploading: 4,

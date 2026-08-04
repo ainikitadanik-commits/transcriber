@@ -1083,7 +1083,16 @@ enum RealtimeCapture {
                 ]
             )
 
+            let backgroundActivity = ProcessInfo.processInfo.beginActivity(
+                options: [
+                    .userInitiated,
+                    .idleSystemSleepDisabled,
+                    .suddenTerminationDisabled,
+                ],
+                reason: "Фоновая realtime-транскрибация"
+            )
             let runtimeFailure = await termination.wait()
+            ProcessInfo.processInfo.endActivity(backgroundActivity)
             writer.send(
                 "state",
                 extra: ["source": "lifecycle", "state": "stopping"]

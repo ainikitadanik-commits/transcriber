@@ -62,6 +62,7 @@ class WebTests(unittest.TestCase):
         self.assertIn('id="live-include-microphone"', html)
         self.assertIn("mute внутри ВКС нельзя определить универсально", html)
         self.assertIn("PCM 16 кГц", html)
+        self.assertIn("встреча продолжит распознаваться в фоне", html)
 
     def test_ui_preserves_accessible_contract_and_responsive_guards(self):
         root = Path(__file__).resolve().parents[1]
@@ -108,6 +109,11 @@ class WebTests(unittest.TestCase):
         self.assertIn("realtimeSourceLabels", javascript)
         self.assertIn("liveDownloads.classList.toggle", javascript)
         self.assertIn("encodeURIComponent(name)", javascript)
+        self.assertIn('window.confirm("Завершить встречу', javascript)
+        self.assertIn('document.addEventListener("visibilitychange"', javascript)
+        self.assertIn('window.addEventListener("focus", refreshRealtimeStatus)', javascript)
+        self.assertNotIn('addEventListener("pagehide"', javascript)
+        self.assertNotIn('addEventListener("beforeunload"', javascript)
 
     def test_realtime_status_exposes_capture_state(self):
         with patch.object(
