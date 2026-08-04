@@ -158,6 +158,7 @@ xcrun swiftc \
   -framework AVFoundation \
   -framework CoreAudio \
   -framework CoreMedia \
+  -framework WebKit \
   "$ROOT/native/realtime_capture.swift" \
   -o "$CONTENTS/MacOS/Transcriber"
 

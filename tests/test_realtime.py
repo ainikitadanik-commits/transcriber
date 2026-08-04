@@ -20,6 +20,7 @@ class RealtimeTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("import CoreAudio", source)
+        self.assertIn("import WebKit", source)
         self.assertIn("AudioHardwareCreateProcessTap", source)
         self.assertIn("AudioHardwareDestroyProcessTap", source)
         self.assertIn("final class MicrophoneCapture", source)
@@ -33,6 +34,10 @@ class RealtimeTests(unittest.TestCase):
         self.assertIn('appendingPathComponent("runtime-instance.json")', source)
         self.assertIn('expectedPID.map { payload?["pid"]', source)
         self.assertIn("removeRuntimeMarker(ifMatching:", source)
+        self.assertIn("WKWebView(frame: .zero", source)
+        self.assertIn("applicationShouldHandleReopen", source)
+        self.assertIn("application.setActivationPolicy(.regular)", source)
+        self.assertNotIn("NSWorkspace.shared.open(interfaceURL)", source)
         self.assertIn("ProcessInfo.processInfo.beginActivity", source)
         self.assertIn(".idleSystemSleepDisabled", source)
         self.assertIn(".suddenTerminationDisabled", source)

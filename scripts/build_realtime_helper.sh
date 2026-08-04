@@ -17,6 +17,7 @@ xcrun swiftc \
   -framework AppKit \
   -framework AVFoundation \
   -framework CoreAudio \
+  -framework WebKit \
   "$ROOT/native/realtime_capture.swift" \
   -o "$OUTPUT"
 

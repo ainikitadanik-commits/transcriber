@@ -33,6 +33,7 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(package_version.group(1), version)
         self.assertEqual(info["CFBundleShortVersionString"], version)
         self.assertIn(f'VERSION="{version}"', build_script)
+        self.assertIn("-framework WebKit", build_script)
         self.assertIn(f"Версия поставки: {version}.", component_ledger)
         self.assertIn(f"## {version} ", changelog)
 
@@ -47,6 +48,7 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(info["CFBundleExecutable"], "Transcriber")
         self.assertEqual(info["CFBundleIconFile"], "Transcriber.icns")
         self.assertEqual(info["CFBundleShortVersionString"], "0.2.0")
+        self.assertFalse(info.get("LSUIElement", False))
         self.assertIn("локальной транскрибации", info["NSMicrophoneUsageDescription"])
         self.assertIn("локальной транскрибации", info["NSAudioCaptureUsageDescription"])
 

@@ -3,9 +3,10 @@ import AVFoundation
 import CoreAudio
 import Darwin
 import Foundation
+import WebKit
 
 @MainActor
-final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
+final class ProductApplicationDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     private struct RuntimeMarker: Codable {
         let buildID: String
         let instanceID: String
@@ -38,6 +39,8 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
     private var startupAttempts = 0
     private var expectedRuntimePID: Int32?
     private var didStart = false
+    private var interfaceWindow: NSWindow?
+    private var webView: WKWebView?
     private let interfaceURL = URL(string: "http://127.0.0.1:7860")!
     private var markerURL: URL {
         dataRoot.appendingPathComponent("runtime-instance.json")
@@ -358,7 +361,58 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openInterface() {
-        NSWorkspace.shared.open(interfaceURL)
+        if interfaceWindow == nil {
+            let configuration = WKWebViewConfiguration()
+            let view = WKWebView(frame: .zero, configuration: configuration)
+            view.navigationDelegate = self
+
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 1180, height: 820),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Транскрибатор"
+            window.minSize = NSSize(width: 760, height: 640)
+            window.contentView = view
+            window.center()
+            window.setFrameAutosaveName("TranscriberMainWindow")
+            interfaceWindow = window
+            webView = view
+        }
+        if webView?.url == nil {
+            webView?.load(URLRequest(url: interfaceURL))
+        }
+        interfaceWindow?.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag {
+            openInterface()
+        }
+        return true
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        let isLocalInterface = url.host == "127.0.0.1" && url.port == 7_860
+        if isLocalInterface {
+            decisionHandler(.allow)
+        } else {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+        }
     }
 
     private func showError(_ message: String) {
@@ -1135,7 +1189,7 @@ enum RealtimeCapture {
     private static func runProductApplication() {
         let application = NSApplication.shared
         let delegate = ProductApplicationDelegate()
-        application.setActivationPolicy(.accessory)
+        application.setActivationPolicy(.regular)
         application.delegate = delegate
         objc_setAssociatedObject(
             application,

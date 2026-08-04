@@ -1,7 +1,7 @@
 # Архитектура системы
 
 Статус: каноническая архитектура
-Актуально на: 2026-07-28
+Актуально на: 2026-08-04
 
 ## Контекст
 
@@ -15,7 +15,7 @@ token. Обработка записей и текста находится вн
 
 | Компонент | Реализация | Ответственность |
 | --- | --- | --- |
-| macOS shell | `native/realtime_capture.swift` | идентичность `.app`, menu bar, запуск runtime, системные разрешения, realtime capture |
+| macOS shell | `native/realtime_capture.swift` | идентичность `.app`, отдельное WKWebView-окно, Dock/menu bar, запуск runtime, системные разрешения, realtime capture |
 | локальный runtime | PyInstaller + Python | Flask UI, pipeline, модели и экспорт |
 | web UI | Flask, HTML, CSS, JS | выбор параметров, запуск, статусы, результаты |
 | CLI | `transcriber.cli` | технический файловый сценарий |
@@ -36,7 +36,8 @@ token. Обработка записей и текста находится вн
 3. Если собственный runtime ещё не запущен, shell запускает
    `transcriber-runtime --no-browser`.
 4. Runtime поднимает Flask на `127.0.0.1:7860`.
-5. Shell открывает интерфейс в браузере и остаётся в menu bar.
+5. Shell показывает локальный UI в собственном WKWebView-окне; браузер для
+   интерфейса не запускается.
 6. При realtime shell запускается повторно как capture helper и пишет события
    и два PCM-потока в pipes родительского Python-процесса.
 7. Завершение из меню останавливает дочерний runtime.
