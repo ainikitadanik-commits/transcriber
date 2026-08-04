@@ -12,6 +12,7 @@ from typing import Any
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
+from . import __version__
 from .core import (
     ENHANCEMENT_MODES,
     MODEL_NAME,
@@ -22,17 +23,33 @@ from .core import (
 )
 from .models import configure_storage, data_dir, prepare_pyannote_models
 from .realtime import capture_manager
+from .realtime_service import RealtimeTranscriptionService
 
 
 DATA_DIR = data_dir()
 INPUT_DIR = DATA_DIR / "input"
 OUTPUT_DIR = DATA_DIR / "output"
+realtime_service = RealtimeTranscriptionService(capture_manager, OUTPUT_DIR)
 
 app = Flask(__name__, template_folder="web/templates", static_folder="web/static")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024 * 1024
 
 _lock = threading.Lock()
 _job: dict[str, Any] = {"status": "idle"}
+_default_instance_id = uuid.uuid4().hex
+
+
+def _runtime_identity() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "product": "transcriber",
+        "bundle_id": "com.ainikitadanik.transcriber",
+        "version": __version__,
+        "build_id": os.getenv("TRANSCRIBER_BUILD_ID") or __version__,
+        "instance_id": os.getenv("TRANSCRIBER_INSTANCE_ID")
+        or _default_instance_id,
+        "pid": os.getpid(),
+    }
 
 
 def _safe_filename(raw_name: str) -> str:
@@ -90,7 +107,8 @@ def _process(
         _update(progress=progress, stage=stage, message=message)
 
     try:
-        prepare_pyannote_models(token, diarization, update_progress)
+        if diarization:
+            prepare_pyannote_models(token, diarization, update_progress)
         os.environ.pop("HF_TOKEN", None)
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -119,6 +137,7 @@ def _process(
             recover_gaps=recover_gaps,
             enhancement_mode=enhancement_mode,
             model_name=model_name,
+            local_windowing=not diarization,
             progress_callback=update_progress,
         )
         _update(
@@ -267,22 +286,43 @@ def open_folder(folder_name: str):
     return jsonify(message="Папка открыта в Finder.")
 
 
+@app.get("/api/health")
+def health():
+    return jsonify(_runtime_identity())
+
+
 @app.get("/api/realtime/status")
 def realtime_status():
-    return jsonify(capture_manager.snapshot())
+    return jsonify(realtime_service.snapshot())
 
 
 @app.post("/api/realtime/start")
 def realtime_start():
+    payload = request.get_json(silent=True) or {}
+    include_microphone = payload.get("include_microphone", False)
+    diarization = payload.get("diarization", False)
+    hf_token = payload.get("hf_token") or None
+    if not isinstance(include_microphone, bool):
+        return jsonify(error="Параметр include_microphone должен быть boolean."), 400
+    if not isinstance(diarization, bool):
+        return jsonify(error="Параметр diarization должен быть boolean."), 400
+    if hf_token is not None and not isinstance(hf_token, str):
+        return jsonify(error="Параметр hf_token должен быть строкой."), 400
     try:
-        return jsonify(capture_manager.start()), 202
+        return jsonify(
+            realtime_service.start(
+                include_microphone=include_microphone,
+                diarization=diarization,
+                hf_token=hf_token.strip() if hf_token else None,
+            )
+        ), 202
     except RuntimeError as error:
         return jsonify(error=str(error)), 409
 
 
 @app.post("/api/realtime/stop")
 def realtime_stop():
-    return jsonify(capture_manager.stop())
+    return jsonify(realtime_service.stop()), 202
 
 
 def build_parser() -> argparse.ArgumentParser:

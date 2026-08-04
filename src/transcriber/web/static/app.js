@@ -23,8 +23,17 @@ const liveStart = document.querySelector("#live-start");
 const livePause = document.querySelector("#live-pause");
 const liveStop = document.querySelector("#live-stop");
 const liveNotice = document.querySelector("#live-notice");
+const liveIncludeMicrophone = document.querySelector("#live-include-microphone");
+const liveDiarization = document.querySelector("#live-diarization");
+const liveHfToken = document.querySelector("#live-hf-token");
+const liveSourceSummary = document.querySelector("#live-source-summary");
 const systemAudioState = document.querySelector("#system-audio-state");
 const microphoneState = document.querySelector("#microphone-state");
+const liveTranscriptContent = document.querySelector("#live-transcript-content");
+const liveDownloads = document.querySelector("#live-downloads");
+const liveTxtLink = document.querySelector("#live-txt-link");
+const liveJsonLink = document.querySelector("#live-json-link");
+const liveDocxLink = document.querySelector("#live-docx-link");
 
 function selectMode(mode) {
   const liveMode = mode === "live";
@@ -70,24 +79,116 @@ function setTextIfChanged(element, text) {
   }
 }
 
+const realtimeSourceLabels = {
+  system: "Системный звук",
+  microphone: "Микрофон",
+};
+
+function formatSegmentTime(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  return formatDuration(seconds);
+}
+
+function createRealtimeSegment(segment, provisional = false) {
+  const item = document.createElement("article");
+  item.className = `live-segment${provisional ? " provisional" : ""}`;
+
+  const meta = document.createElement("div");
+  meta.className = "live-segment-meta";
+  const source = segment.speaker || realtimeSourceLabels[segment.source] || "Аудио";
+  meta.textContent = `${source} · ${formatSegmentTime(segment.start)}`;
+  if (provisional) {
+    const draft = document.createElement("span");
+    draft.textContent = "Черновик";
+    meta.append(" · ", draft);
+  }
+
+  const text = document.createElement("p");
+  text.textContent = segment.text || "";
+  item.append(meta, text);
+  return item;
+}
+
+function renderRealtimeTranscript(state) {
+  const committed = Array.isArray(state.segments)
+    ? state.segments.filter((segment) => segment && segment.committed !== false && segment.text)
+    : [];
+  const provisional = Object.values(state.provisional || {})
+    .filter((segment) => segment && segment.text);
+
+  liveTranscriptContent.replaceChildren();
+  if (committed.length || provisional.length) {
+    committed.forEach((segment) => {
+      liveTranscriptContent.append(createRealtimeSegment(segment));
+    });
+    provisional.forEach((segment) => {
+      liveTranscriptContent.append(createRealtimeSegment(segment, true));
+    });
+    liveTranscriptContent.scrollTop = liveTranscriptContent.scrollHeight;
+    return;
+  }
+
+  const placeholder = document.createElement("div");
+  placeholder.className = "live-placeholder";
+  const text = document.createElement("p");
+  text.id = "live-transcript-text";
+  text.textContent = ["loading", "waiting_audio", "running"].includes(state.asr_status)
+    ? "Слушаем встречу. Распознанная речь появится здесь с небольшой задержкой."
+    : state.asr_status === "finalizing"
+      ? "Завершаем распознавание и сохраняем результаты…"
+      : "После запуска здесь будет появляться распознанная речь с небольшой задержкой.";
+  placeholder.append(text);
+  liveTranscriptContent.append(placeholder);
+}
+
+function renderRealtimeDownloads(state) {
+  const files = [
+    [liveTxtLink, state.txt_name],
+    [liveJsonLink, state.json_name],
+    [liveDocxLink, state.docx_name],
+  ];
+  const ready = state.asr_status === "done" && files.every(([, name]) => Boolean(name));
+  liveDownloads.classList.toggle("hidden", !ready);
+  if (!ready) return;
+  files.forEach(([link, name]) => {
+    link.href = `/files/${encodeURIComponent(name)}`;
+  });
+}
+
 function renderRealtime(state) {
-  const active = ["starting", "recording", "stopping"].includes(state.status);
-  const canStop = active || state.status === "error";
-  setTextIfChanged(liveState, {
-    idle: "Захват готов",
+  const captureActive = ["starting", "recording", "stopping"].includes(state.status);
+  const asrActive = ["loading", "waiting_audio", "running", "finalizing"].includes(state.asr_status);
+  const active = captureActive || asrActive;
+  const stateLabel = {
+    idle: "Готово к встрече",
+    loading: "Загружаем модель",
+    waiting_audio: "Ожидаем звук",
+    running: "Идёт транскрибация",
+    finalizing: "Сохраняем результат",
+    done: "Готово",
+    error: "Ошибка",
+  }[state.asr_status] || {
     starting: "Запрашиваем доступ",
-    recording: "Идёт захват",
+    recording: "Идёт транскрибация",
     stopping: "Завершаем",
     error: "Ошибка",
-  }[state.status] || "Проверяем");
-  liveState.classList.toggle("planned", state.status === "idle");
-  liveState.classList.toggle("recording", state.status === "recording");
-  liveState.classList.toggle("error", state.status === "error");
-  liveModePanel.classList.toggle("is-recording", state.status === "recording");
+  }[state.status] || "Проверяем";
+  const error = state.status === "error" || state.asr_status === "error";
+  const microphoneEnabled = active
+    ? Boolean(state.microphone_enabled)
+    : liveIncludeMicrophone.checked;
+  const diarizationEnabled = active
+    ? Boolean(state.diarization_enabled)
+    : liveDiarization.checked;
+  setTextIfChanged(liveState, stateLabel);
+  liveState.classList.toggle("planned", state.asr_status === "idle" && state.status === "idle");
+  liveState.classList.toggle("recording", state.asr_status === "running");
+  liveState.classList.toggle("error", error);
+  liveModePanel.classList.toggle("is-recording", state.asr_status === "running");
   liveTimer.textContent = formatDuration(state.elapsed_seconds || 0);
   liveTimer.setAttribute("datetime", `PT${state.elapsed_seconds || 0}S`);
   setTextIfChanged(liveNotice, state.available
-    ? state.message
+    ? (state.asr_message || state.message || "Готово к встрече.")
     : "Помощник захвата не собран. Перезапустите транскрибатор после обновления.");
   const waitingLabel = state.status === "starting"
     ? "проверяем"
@@ -95,12 +196,24 @@ function renderRealtime(state) {
       ? "ошибка"
       : "ожидаем";
   setTextIfChanged(systemAudioState, `Системный звук: ${state.system_audio ? "есть звук" : waitingLabel}`);
-  setTextIfChanged(microphoneState, `Микрофон: ${state.microphone ? "есть звук" : waitingLabel}`);
+  setTextIfChanged(
+    microphoneState,
+    `Микрофон: ${microphoneEnabled ? (state.microphone ? "есть звук" : waitingLabel) : "выключен"}`,
+  );
+  setTextIfChanged(
+    liveSourceSummary,
+    `${microphoneEnabled ? "Системный звук + микрофон" : "Системный звук"}${diarizationEnabled ? " · спикеры включены" : ""}`,
+  );
   systemAudioState.classList.toggle("active", Boolean(state.system_audio));
   microphoneState.classList.toggle("active", Boolean(state.microphone));
+  liveIncludeMicrophone.disabled = active;
+  liveDiarization.disabled = active;
+  liveHfToken.disabled = active;
   liveStart.disabled = !state.available || active;
   livePause.disabled = true;
-  liveStop.disabled = !canStop;
+  liveStop.disabled = !active;
+  renderRealtimeTranscript(state);
+  renderRealtimeDownloads(state);
 }
 
 async function refreshRealtimeStatus() {
@@ -115,17 +228,30 @@ async function refreshRealtimeStatus() {
       available: false,
       message: error.message,
       elapsed_seconds: 0,
+      asr_status: "error",
+      asr_message: error.message,
+      segments: [],
+      provisional: {},
     });
   }
 }
 
 liveStart.addEventListener("click", async () => {
   liveStart.disabled = true;
-  liveNotice.textContent = "Запускаем локальный захват…";
+  liveNotice.textContent = "Запускаем встречу и загружаем модель…";
   try {
-    const response = await fetch("/api/realtime/start", { method: "POST" });
+    const response = await fetch("/api/realtime/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        include_microphone: liveIncludeMicrophone.checked,
+        diarization: liveDiarization.checked,
+        hf_token: liveHfToken.value,
+      }),
+    });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Не удалось запустить захват.");
+    liveHfToken.value = "";
+    if (!response.ok) throw new Error(data.error || "Не удалось начать встречу.");
     renderRealtime(data);
   } catch (error) {
     liveNotice.textContent = error.message;
@@ -136,11 +262,12 @@ liveStart.addEventListener("click", async () => {
 });
 
 liveStop.addEventListener("click", async () => {
+  if (!window.confirm("Завершить встречу и сохранить транскрипцию?")) return;
   liveStop.disabled = true;
   try {
     const response = await fetch("/api/realtime/stop", { method: "POST" });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Не удалось остановить захват.");
+    if (!response.ok) throw new Error(data.error || "Не удалось завершить встречу.");
     renderRealtime(data);
   } catch (error) {
     liveNotice.textContent = error.message;
@@ -149,6 +276,15 @@ liveStop.addEventListener("click", async () => {
 
 refreshRealtimeStatus();
 setInterval(refreshRealtimeStatus, 1500);
+
+// Realtime-сессия принадлежит локальному backend, а не браузерной вкладке.
+// После фонового режима браузер может задержать таймеры, поэтому при возврате
+// сразу восстанавливаем фактическое состояние и прошедшее время с backend.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshRealtimeStatus();
+});
+window.addEventListener("focus", refreshRealtimeStatus);
+window.addEventListener("pageshow", refreshRealtimeStatus);
 
 const stageCaps = {
   uploading: 4,

@@ -47,11 +47,13 @@ fallback отсутствует.
 
 Статус: Accepted
 
-Решение: native `.app` управляет локальным Python/Flask runtime, UI открывается
-в браузере на `127.0.0.1:7860`.
+Решение: native `.app` управляет локальным Python/Flask runtime и показывает UI
+в собственном WKWebView-окне. Flask по-прежнему доступен только внутри Mac на
+`127.0.0.1:7860`; системный браузер для интерфейса не запускается.
 
-Последствия: переиспользуется существующий UI; порт и lifecycle требуют
-контроля. Переход на полностью native UI не является текущим направлением.
+Последствия: переиспользуется существующий HTML/CSS/JS UI, но приложение имеет
+отдельное окно и Dock-иконку. Порт и lifecycle остаются под контролем shell.
+Внешние справочные ссылки открываются системно.
 
 ## ADR-005. GigaAM RNNT как default, CTC как option
 
@@ -154,6 +156,12 @@ Audio Tap с исключением собственного процесса. S
 `NSAudioCaptureUsageDescription` штатным пользовательским prompt без захвата
 экрана. Microphone захватывается отдельным AVFoundation/Core Audio контуром.
 
+Состояние реализации 2026-07-28: внутренний candidate использует private Core
+Audio Tap и отдельный AVAudioEngine microphone-контур; ScreenCaptureKit удалён
+из capture path. Автоматические core/API/UI тесты проходят. Это не меняет
+статус ADR: live signed TCC dual-source evidence на целевом corporate no-admin
+Mac отсутствует.
+
 Последствия: меняются lifecycle двух источников, permission/error state,
 создание и cleanup tap/aggregate device, реакция на смену output device.
 Стабильная Developer ID identity обязательна для проверки continuity между
@@ -174,6 +182,27 @@ Audio Tap с исключением собственного процесса. S
 
 Условие принятия: все критерии spike подтверждены evidence bundle на целевом
 корпоративном Mac. После принятия ADR-009 получает статус `Superseded`.
+
+## ADR-014. Микрофон в realtime выключен по умолчанию
+
+Статус: Accepted
+
+Контекст: состояние mute внутри Яндекс Телемоста, Zoom, Teams и браузерных ВКС
+не имеет общего системного API. Факт, что процесс использует microphone device,
+не означает, что собеседники слышат пользователя.
+
+Решение: базовый realtime-сценарий захватывает только system audio. Микрофон
+подключается отдельным явным переключателем перед Start. При выключенном
+переключателе microphone permission не запрашивается, AVAudioEngine не
+запускается, PCM pipe не создаётся, ASR-сессия не принимает microphone source.
+
+Последствия: пользователь не попадает в транскрипцию по умолчанию. Если нужен
+его голос, он вручную включает источник и самостоятельно согласует его с mute
+в интерфейсе ВКС. Продукт не обещает автоматическую синхронизацию mute.
+
+Проверка: unit/API/native contract tests подтверждают system-only default и
+явный dual-source opt-in; packaged acceptance проверяет отсутствие microphone
+prompt и microphone-сегментов в system-only сессии.
 
 ## Шаблон новой записи
 

@@ -1,0 +1,5 @@
+Package: tokenizers
+License classifier from the bundled wheel metadata: Apache Software License
+
+The complete Apache License 2.0 text is included in this distribution at:
+../transformers/LICENSE

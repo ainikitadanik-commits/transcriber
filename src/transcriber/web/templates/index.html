@@ -4,15 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Транскрибатор</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='transcriber-logo.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   </head>
   <body>
     <div class="app-background" aria-hidden="true"></div>
     <main class="shell">
       <header class="hero">
-        <div class="brand-mark" aria-hidden="true">
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
+        <img class="brand-mark" src="{{ url_for('static', filename='transcriber-logo.png') }}" alt="" aria-hidden="true">
         <div class="hero-copy">
           <p class="eyebrow">Локально на вашем Mac</p>
           <h1>Транскрибатор</h1>
@@ -169,44 +168,84 @@
           <div class="live-heading">
             <div>
               <p class="eyebrow">Живая встреча</p>
-              <h2>Захват звука встречи</h2>
-              <p>Системный звук и микрофон проверяются локально. Распознавание в реальном времени пока планируется.</p>
+              <h2>Транскрибация в реальном времени</h2>
+              <p>Системный звук распознаётся локально с небольшой задержкой. Ваш микрофон можно добавить отдельно.</p>
             </div>
-            <span class="live-state planned" id="live-state" role="status" aria-live="polite">Только захват</span>
+            <span class="live-state planned" id="live-state" role="status" aria-live="polite">Готово к встрече</span>
           </div>
 
           <div class="live-meter" aria-label="Продолжительность захвата">
             <span class="live-dot" aria-hidden="true"></span>
             <time id="live-timer" datetime="PT0S">00:00:00</time>
-            <span>Системный звук + микрофон</span>
+            <span id="live-source-summary">Системный звук · спикеры включены</span>
           </div>
+
+          <div class="speaker-option live-microphone-option">
+            <label class="speaker-toggle" for="live-include-microphone">
+              <input id="live-include-microphone" type="checkbox">
+              <span class="switch" aria-hidden="true"></span>
+              <span class="speaker-copy">
+                <strong>Добавлять мой микрофон</strong>
+                <small>Выключено по умолчанию: mute внутри ВКС нельзя определить универсально.</small>
+              </span>
+            </label>
+          </div>
+
+          <div class="speaker-option live-diarization-option">
+            <label class="speaker-toggle" for="live-diarization">
+              <input id="live-diarization" type="checkbox" checked>
+              <span class="switch" aria-hidden="true"></span>
+              <span class="speaker-copy">
+                <strong>Разделять участников встречи</strong>
+                <small>Акустически определяет голоса в системном звуке и подписывает их «Спикер 1», «Спикер 2»…</small>
+              </span>
+            </label>
+          </div>
+
+          <details class="token-box live-token-box">
+            <summary>Токен модели спикеров — только для первого запуска</summary>
+            <div class="token-content">
+              <label for="live-hf-token">Hugging Face token</label>
+              <input id="live-hf-token" type="password" autocomplete="off" placeholder="hf_••••••••">
+              <small>Сначала примите условия <a href="https://huggingface.co/pyannote/segmentation-3.0" target="_blank" rel="noreferrer">segmentation‑3.0</a> и <a href="https://huggingface.co/pyannote/speaker-diarization-community-1" target="_blank" rel="noreferrer">Community‑1</a>. Read token нужен один раз и не сохраняется; после загрузки всё работает локально.</small>
+            </div>
+          </details>
 
           <div class="live-sources" aria-label="Состояние источников звука">
             <span id="system-audio-state">Системный звук: ожидаем</span>
-            <span id="microphone-state">Микрофон: ожидаем</span>
+            <span id="microphone-state">Микрофон: выключен</span>
             <span class="audio-format">PCM 16 кГц · mono</span>
           </div>
 
-          <div class="live-transcript" aria-live="polite" aria-disabled="true">
-            <strong>Живой текст · планируется</strong>
-            <div class="live-placeholder">
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h2l2-5 4 10 2-5h4"></path></svg>
-              <p id="live-transcript-text">Сейчас приложение только проверяет локальный захват звука. Живая расшифровка, пауза и экспорт ещё не реализованы.</p>
+          <div class="live-transcript" aria-live="polite" aria-atomic="false">
+            <strong>Живой текст</strong>
+            <div class="live-transcript-content" id="live-transcript-content">
+              <div class="live-placeholder">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h2l2-5 4 10 2-5h4"></path></svg>
+                <p id="live-transcript-text">После запуска здесь будет появляться распознанная речь с небольшой задержкой.</p>
+              </div>
             </div>
+          </div>
+
+          <div class="downloads live-downloads hidden" id="live-downloads" aria-live="polite">
+            <a id="live-txt-link" class="download" href="#">Скачать TXT</a>
+            <a id="live-docx-link" class="download" href="#">Скачать DOCX</a>
+            <a id="live-json-link" class="download secondary" href="#">Скачать JSON</a>
           </div>
 
           <div class="live-actions">
             <button class="primary" id="live-start" type="button" disabled>
               <span aria-hidden="true">✦</span>
-              <span>Проверить захват</span>
+              <span>Начать встречу</span>
             </button>
-            <button class="live-secondary" id="live-pause" type="button" disabled title="Пауза появится вместе с realtime-распознаванием">
+            <button class="live-secondary" id="live-pause" type="button" disabled title="Пауза появится в следующем обновлении">
               Пауза
-              <small>Планируется</small>
+              <small>Скоро</small>
             </button>
-            <button class="live-secondary danger" id="live-stop" type="button" disabled>Завершить</button>
+            <button class="live-secondary danger" id="live-stop" type="button" disabled>Завершить встречу</button>
           </div>
-          <p class="live-notice" id="live-notice" aria-live="polite">Проверяем локальный помощник захвата…</p>
+          <p class="live-background-note">Можно переключить или закрыть вкладку: встреча продолжит распознаваться в фоне. Для завершения используйте кнопку выше или меню приложения.</p>
+          <p class="live-notice" id="live-notice" aria-live="polite">Проверяем готовность к встрече…</p>
         </section>
 
         <section class="storage-links" aria-labelledby="storage-title">

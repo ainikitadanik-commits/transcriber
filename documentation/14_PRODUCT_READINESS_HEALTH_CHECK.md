@@ -1,185 +1,104 @@
 # Product readiness health-check
 
-Статус: канонический baseline, release `NO-GO`
-Дата проверки: 2026-07-20
-Проверенный source state: `main@460eb11`
+Статус: internal candidate, внешний release `NO-GO`
+Дата проверки: 2026-08-04
+Source state: `codex/product-app-release`; точный immutable commit будет записан
+в manifest финального DMG
 Целевая версия: product `.app` 0.2.x
 
-## Решение тимлида
+## Verdict
 
-Технический каркас приложения собран. UI polish выполнен как отдельно
-согласованное исключение и честно показывает только доступный capture
-diagnostic, не маскируя отсутствие realtime ASR. До передачи коллегам
-обязательны остальные P0/P1 ниже.
+Source/runtime internal candidate достигнут. Файловая offline-транскрибация,
+runtime identity, release audits и внутренний realtime-контур подтверждены
+ниже. Candidate подписан ad hoc и не должен передаваться коллегам как готовый
+продукт.
 
-Жёсткий критерий аудитории: установка, первый запуск и выдача доступов должны
-выполняться стандартным пользователем без admin credentials. Инструкция
-«включите разрешение вручную» не считается решением.
+Внешний verdict остаётся `NO-GO`: отсутствуют Developer ID identity/key,
+notarization, stapling, Gatekeeper и clean corporate no-admin/MDM/TCC
+acceptance. Наличие кода, unit tests и ad-hoc `.app` эти P0 не закрывает.
 
-## Как проведена проверка
+## Подтверждённое evidence
 
-Независимые read-only проверки выполнили роли:
+| Gate | Результат |
+| --- | --- |
+| Automated suite | PASS, 83/83 |
+| Frozen runtime identity | PASS: `/api/health` возвращает точные `build_id` и `instance_id` |
+| Offline bundled GigaAM file ASR | PASS |
+| Realtime core/API/UI/export | IMPLEMENTED, automated tests PASS |
+| Realtime anonymous speaker diarization | IMPLEMENTED, real-meeting quality benchmark pending |
+| Live signed system+mic TCC | UNKNOWN |
+| Mach-O compatibility audit | PASS: 417 Mach-O, arm64, minOS <= 15 |
+| Product FFmpeg | PASS: LGPL, network disabled, required filters/muxer/protocols |
+| Python license audit | PASS: 41 included packages mapped |
+| Candidate signing | ad hoc only |
+| Final DMG release guard | IMPLEMENTED: requires Developer ID + notary profile, signs and assesses app/DMG |
+| Final signed DMG execution | BLOCKED: Apple identity/profile absent on build Mac |
 
-- системный аналитик — требования, ADR, privacy и readiness;
-- дебаггер — тесты, artifact/runtime, TCC, port и ошибки;
-- лид backend/frontend — capture flow, API/UI и lifecycle;
-- упаковка продукта — bundle, nested code, models, FFmpeg и distribution.
+Offline file-ASR smoke выполнялся с `HF_HUB_OFFLINE=1`, explicit bundled GigaAM
+model directory и без token. Десятисекундный WAV завершился `status=done`:
 
-Тимлид воспроизвёл запуск установленного `.app` и реальный
-`POST /api/realtime/start`.
+- TXT 284 B, JSON 2.1 KiB, DOCX 38 KiB;
+- 1 сегмент, 136 символов;
+- `processing.mode=local_windows`;
+- `device=cpu`.
 
-## Подтверждённый baseline
+Базовый файловый режим использует bundled GigaAM offline и не требует pyannote
+models, HF token или сети. Pyannote-модели не входят в bundle: diarization
+остаётся optional gated path, где пользователь отдельно принимает условия и
+временно вводит Read token.
 
-- Git clean; `main == origin/main == 460eb11`.
-- 37/37 автоматических тестов проходят.
-- `dist/Транскрибатор.app` существует, arm64, version 0.2.0, bundle ID
-  `com.ainikitadanik.transcriber`.
-- В bundle присутствуют PyInstaller runtime, GigaAM RNNT/CTC weights,
-  LGPL FFmpeg без network и license materials.
-- FFmpeg реально преобразует M4A в `pcm_s16le` через pipe.
-- Native helper synthetic self-test выдаёт ненулевой system/microphone PCM.
-- Flask слушает loopback.
-- Установленная и локальная `.app` проходят локальный
-  `codesign --verify --deep --strict`.
+## Realtime boundary
 
-Эти доказательства подтверждают каркас, но не product acceptance.
+Internal candidate содержит Core Audio Tap для system audio, отдельный
+AVAudioEngine microphone-контур, bounded PCM buffers, window scheduler,
+локальный GigaAM adapter, overlap dedup, API/UI state и TXT/JSON/DOCX export.
+Исходный realtime PCM не должен записываться на диск.
 
-## Release blockers
+Опциональная realtime-diarization использует word timestamps GigaAM,
+exclusive speaker turns и embeddings pyannote Community-1. Она акустически
+разделяет системный звук на анонимные `Спикер N` без интеграции с ВКС и не
+изменяет аудиовход ASR. Unit и service/export contracts подтверждены; реальная
+точность labels, перебивания и дополнительная latency ещё требуют acceptance.
 
-### P0. Audio permission не работает у целевой аудитории
+Это не является realtime product acceptance. [ADR-013](11_ARCHITECTURE_DECISIONS.md)
+остаётся `Proposed`, пока на целевом подписанном `.app` не подтверждены:
 
-Реальный packaged start завершился:
+1. отдельные system-audio и microphone prompts без admin credentials;
+2. отсутствие ручного Screen Recording step;
+3. одновременный ненулевой PCM обоих источников;
+4. cleanup tap/aggregate device после Stop/Quit и 30-минутной сессии;
+5. permission continuity после restart/update с той же Developer ID identity;
+6. built-in output, наушники, Teams/Zoom/browser и реальный MDM denial.
+7. устойчивые `Спикер N` на контрольной встрече с 2–6 участниками, сменой
+   очередности и короткими перебиваниями.
 
-```text
-status=error
-system_audio=false
-microphone=false
-ScreenCaptureKit: userDeclined
-```
+## External P0
 
-Падение происходит до отдельной проверки microphone. Текущий путь зависит от
-Screen & System Audio Recording, которое пользователь не может включить.
+1. Получить и назначить release owner для `Developer ID Application` identity
+   и private key.
+2. Подписать все nested Mach-O bottom-up и внешний `.app` стабильной identity.
+3. Выполнить notarization, stapling и Gatekeeper assessment.
+4. Запустить подготовленный fail-closed product DMG pipeline и проверить
+   установку в `~/Applications` без admin.
+5. Выполнить L5 на чистой corporate no-admin учётной записи: install,
+   system-audio/microphone prompts, MDM/TCC states, bundled offline file ASR,
+   realtime dual-source, Stop/Quit/restart/update.
+6. Повторить Mach-O, FFmpeg, license, signature, network/token/log и checksum
+   audits на точном final signed artifact.
 
-Решение: [ADR-013](11_ARCHITECTURE_DECISIONS.md) и signed Core Audio Tap spike.
-Приложение должно получить отдельный system-audio prompt без admin credentials
-и без ручного Screen Recording. MDM-запрет не обходится.
+MDM/PPPC-запрет не обходится кодом. Если корпоративная политика запрещает
+audio capture, решение принимает владелец IT-профиля.
 
-### P0. Нет стабильной release identity
+## Что нельзя называть готовым
 
-Текущий app подписан ad hoc:
+- transferable/notarized product release;
+- Gatekeeper acceptance;
+- no-admin first-run на корпоративном Mac;
+- live signed dual-source realtime capture;
+- continuity TCC-разрешений между обновлениями;
+- MDM denial/error acceptance;
+- 30-минутная realtime-сессия;
+- final signed DMG и rollback acceptance.
 
-- `TeamIdentifier` отсутствует;
-- designated requirement привязан к CDHash и меняется после rebuild;
-- Developer ID/notarization/stapling отсутствуют;
-- product DMG 0.2.0 отсутствует.
-
-Следствие: нельзя доказать continuity TCC permissions и Gatekeeper acceptance.
-
-### P0. Нарушен privacy-инвариант telemetry-free
-
-В bundled dependency `pyannote.audio 4.0.7` metrics включены по умолчанию.
-Приложение не устанавливает `PYANNOTE_METRICS_ENABLED=0` до импорта pyannote.
-Это блокирует SEC-003 до исправления и наблюдаемого network test.
-
-### P0. Bundle models могут не загрузиться на чистом Mac
-
-Native shell задаёт путь к моделям в Resources, но `configure_storage()`
-безусловно заменяет его на user Application Support. На Mac разработчика это
-маскируется кэшем; на чистой учётной записи bundled weights могут не
-разрешиться.
-
-### P0. Artifact не соответствует minimum macOS
-
-`Info.plist` и native shell заявляют macOS 15.0, но фактический embedded
-Python framework и product FFmpeg имеют `minos 26.0`. Следовательно, текущий
-artifact нельзя передавать коллегам на macOS 15–25. Runtime и FFmpeg должны
-быть пересобраны в совместимом окружении, а release gate — проверять каждый
-Mach-O.
-
-### P0. License bundle неполон
-
-В runtime присутствуют `python-docx` и `transformers`, но их лицензии не
-найдены в release license bundle. NFR-LIC-001 не выполнен до полной
-artifact-to-license сверки.
-
-## Stage blockers
-
-### P1. Product FFmpeg расходится с pipeline
-
-Audio enhancement использует `ebur128`, `highpass`, `loudnorm` и muxer `null`,
-которых нет в product FFmpeg. `auto` молча пропускает enhancement, `on`
-завершается ошибкой.
-
-### P1. Runtime не имеет строгого ownership
-
-Обнаружен сценарий, когда новая shell подключается к runtime backup-сборки на
-`127.0.0.1:7860`. Нужны instance/build ID, single-instance ownership, полный
-HTTP health response и детерминированный shutdown.
-
-### P1. Permission error model недостаточна
-
-Классификация ищет английские `permission/denied`; локализованный
-`userDeclined` становится общим сообщением. Нужны стабильные коды состояний,
-разделение `denied`/`managed_denied`/device error и журналирование без
-чувствительных данных.
-
-### Mitigated. UI обещает отсутствующий realtime ASR
-
-Реализованы capture и bounded RAM buffers, но не scheduler, live text, Pause,
-finalization и export. С 2026-07-20 UI честно обозначает capture diagnostic,
-а Pause, live text и export — как planned. Функциональный realtime-блокер
-остаётся открытым, но UI больше не выдаёт его за готовую возможность.
-
-## Порядок работ
-
-### Gate A — до финального UI/release polish
-
-1. Отключить pyannote metrics до импорта и добавить regression/network check.
-2. Исправить resolver bundled GigaAM models и clean-account test.
-3. Дополнить product FFmpeg и artifact-level Auto/On tests.
-4. Исправить single-instance, port ownership и shutdown.
-5. Принять ADR-013 через signed Core Audio Tap spike на no-admin Mac.
-6. Ввести permission/error state model.
-7. Скрыть или честно переименовать незавершённый realtime.
-
-Ограниченный visual polish файлового сценария и честного capture diagnostic
-выполнен по исключению 2026-07-20. Дальнейший UI, связанный с полноценным
-realtime, и release polish выполняются только после Gate A.
-
-### Gate B — до передачи коллегам
-
-1. Интегрировать принятый audio capture contour и отдельный microphone input.
-2. Пересобрать runtime/FFmpeg с minimum macOS 15.0 и проверить все Mach-O.
-3. Пересобрать полный license bundle из фактического artifact.
-4. Получить Developer ID Application.
-5. Подписать nested Mach-O bottom-up, затем внешний `.app`.
-6. Notarize, staple и проверить Gatekeeper.
-7. Собрать product DMG с установкой в `~/Applications` без admin.
-8. Пройти L5 на чистой no-admin учётной записи: prompts, bundled models,
-   packaged ASR, offline repeat, Stop/Quit/restart/update.
-9. Выполнить network/token/log/PCM и license review.
-10. Синхронизировать README, changelog и release notes.
-
-## Что сейчас нельзя называть готовым
-
-- no-admin audio capture;
-- local-only/privacy compliance;
-- stable permissions между обновлениями;
-- clean-account packaged transcription;
-- audio enhancement в product artifact;
-- realtime transcription и export;
-- product DMG 0.2.0;
-- совместимость текущего artifact с macOS 15–25;
-- полноту license bundle;
-- Gatekeeper/notarized external release;
-- update/rollback acceptance.
-
-## Недоступные доказательства
-
-- TCC database и unified macOS log недоступны текущему standard user;
-- Developer ID identity отсутствует;
-- чистый корпоративный Mac с действующим MDM не предоставлен;
-- notarization и Gatekeeper release test не выполнялись;
-- полный ASR/network capture из установленного bundle не выполнялся.
-
-Эти пункты не закрываются предположениями и остаются release evidence gates.
+UI scope не расширяется. Realtime нельзя рекламировать как готовую
+пользовательскую функцию до закрытия перечисленных evidence gates.

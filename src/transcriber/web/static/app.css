@@ -119,36 +119,12 @@ summary:focus-visible,
   width: 72px;
   height: 72px;
   flex: 0 0 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
+  display: block;
+  object-fit: cover;
   border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 20px;
-  color: #fff;
-  background: linear-gradient(150deg, #68d5bd 0%, #20a583 58%, #0b725c 100%);
-  box-shadow: 0 15px 34px rgba(38, 156, 126, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-}
-
-.brand-mark span {
-  width: 3px;
-  display: block;
-  border-radius: var(--radius-pill);
-  background: currentColor;
-}
-
-.brand-mark span:nth-child(1),
-.brand-mark span:nth-child(5) {
-  height: 14px;
-}
-
-.brand-mark span:nth-child(2),
-.brand-mark span:nth-child(4) {
-  height: 27px;
-}
-
-.brand-mark span:nth-child(3) {
-  height: 40px;
+  background: #020208;
+  box-shadow: 0 15px 34px rgba(63, 79, 229, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.38);
 }
 
 .eyebrow {
@@ -1093,6 +1069,10 @@ select:disabled {
   gap: 8px;
 }
 
+.live-microphone-option {
+  margin: 12px 0 0;
+}
+
 .live-sources span {
   max-width: 100%;
   padding: 7px 11px;
@@ -1164,6 +1144,47 @@ select:disabled {
   color: var(--color-text-muted);
   font-size: 14px;
   line-height: 1.55;
+}
+
+.live-transcript-content {
+  min-width: 0;
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.live-segment {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(31, 94, 78, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.live-segment.provisional {
+  border-style: dashed;
+  background: rgba(231, 244, 239, 0.52);
+}
+
+.live-segment-meta {
+  margin-bottom: 5px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.live-segment p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.live-downloads {
+  margin-top: 14px;
 }
 
 .live-actions {
@@ -1379,15 +1400,6 @@ footer svg {
     height: 58px;
     flex-basis: 58px;
     border-radius: 17px;
-  }
-
-  .brand-mark span:nth-child(3) {
-    height: 31px;
-  }
-
-  .brand-mark span:nth-child(2),
-  .brand-mark span:nth-child(4) {
-    height: 22px;
   }
 
   h1 {

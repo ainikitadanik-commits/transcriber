@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from transcriber.realtime import (
     PCMBuffer,
@@ -12,6 +12,53 @@ from transcriber.realtime import (
 
 
 class RealtimeTests(unittest.TestCase):
+    def test_native_capture_sources_are_independent_and_structured(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "native"
+            / "realtime_capture.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("import CoreAudio", source)
+        self.assertIn("import WebKit", source)
+        self.assertIn("AudioHardwareCreateProcessTap", source)
+        self.assertIn("AudioHardwareDestroyProcessTap", source)
+        self.assertIn("final class MicrophoneCapture", source)
+        self.assertIn("AVAudioEngine()", source)
+        self.assertIn("guard let systemFD else", source)
+        self.assertIn("let microphoneCapture = microphoneFD.map", source)
+        self.assertNotIn("ScreenCaptureKit", source)
+        self.assertIn("GET /api/health HTTP/1.0", source)
+        self.assertIn('environment["TRANSCRIBER_BUILD_ID"]', source)
+        self.assertIn('environment["TRANSCRIBER_INSTANCE_ID"]', source)
+        self.assertIn('appendingPathComponent("runtime-instance.json")', source)
+        self.assertIn('expectedPID.map { payload?["pid"]', source)
+        self.assertIn("removeRuntimeMarker(ifMatching:", source)
+        self.assertIn("WKWebView(frame: .zero", source)
+        self.assertIn("window.isReleasedWhenClosed = false", source)
+        self.assertIn("WKUIDelegate", source)
+        self.assertIn("view.uiDelegate = self", source)
+        self.assertIn("runOpenPanelWith parameters", source)
+        self.assertIn("WKDownloadDelegate", source)
+        self.assertIn("navigationResponse: WKNavigationResponse", source)
+        self.assertIn("decideDestinationUsing response", source)
+        self.assertIn("applicationShouldHandleReopen", source)
+        self.assertIn("application.setActivationPolicy(.regular)", source)
+        self.assertNotIn("NSWorkspace.shared.open(interfaceURL)", source)
+        self.assertIn("ProcessInfo.processInfo.beginActivity", source)
+        self.assertIn(".idleSystemSleepDisabled", source)
+        self.assertIn(".suddenTerminationDisabled", source)
+        self.assertIn("ProcessInfo.processInfo.endActivity", source)
+        self.assertNotIn('text.contains("\\"audio_format\\"")', source)
+        for field in (
+            '"source"',
+            '"error_domain"',
+            '"error_code"',
+            '"native_code"',
+            '"state"',
+        ):
+            self.assertIn(field, source)
+
     def test_pcm_buffer_is_bounded_and_drains_in_order(self):
         buffer = PCMBuffer(limit=6)
         buffer.append(b"abcd")
@@ -71,6 +118,30 @@ class RealtimeTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "build_realtime_helper"):
                 manager.start()
+
+    def test_system_only_start_does_not_open_microphone_channel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / "realtime-capture"
+            helper.touch()
+            helper.chmod(0o755)
+            process = Mock()
+            process.stdout = []
+            with (
+                patch.dict(os.environ, {"TRANSCRIBER_CAPTURE_HELPER": str(helper)}),
+                patch("transcriber.realtime.os.pipe", return_value=(10, 11)) as pipe,
+                patch("transcriber.realtime.os.close"),
+                patch("transcriber.realtime.subprocess.Popen", return_value=process) as popen,
+                patch("transcriber.realtime.threading.Thread") as thread,
+            ):
+                state = RealtimeCaptureManager().start()
+
+        pipe.assert_called_once_with()
+        command = popen.call_args.args[0]
+        self.assertEqual(command, [str(helper), "--system-fd", "11"])
+        self.assertEqual(popen.call_args.kwargs["pass_fds"], (11,))
+        self.assertEqual(thread.call_count, 3)
+        self.assertFalse(state["microphone_enabled"])
+        self.assertEqual(state["permissions"]["microphone"], "disabled")
 
 
 if __name__ == "__main__":

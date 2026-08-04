@@ -1,7 +1,7 @@
 # Качество и приёмка
 
 Статус: обязательный quality gate
-Актуально на: 2026-07-20
+Актуально на: 2026-07-28
 
 ## Принцип
 
@@ -87,6 +87,11 @@ Playwright screenshots хранятся в `output/playwright/` как evidence 
 - Flask upload/status/result flows;
 - realtime PCM buffer и helper routing;
 - packaging identity, entitlement и LGPL FFmpeg invariants.
+
+Internal candidate на общей ветке прошёл 72/72 автоматических теста
+2026-07-28. Отдельный frozen-runtime offline GigaAM file-ASR smoke также
+прошёл. Эти результаты не заменяют L5 signed no-admin/Gatekeeper/TCC
+acceptance.
 
 Каноническая команда:
 

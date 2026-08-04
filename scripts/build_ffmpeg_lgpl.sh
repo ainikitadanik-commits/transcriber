@@ -7,9 +7,13 @@ VENDOR="$ROOT/build/product/vendor"
 VERSION="7.1"
 ARCHIVE="$VENDOR/ffmpeg-$VERSION.tar.xz"
 SOURCE="$VENDOR/ffmpeg-$VERSION"
+BUILD="$VENDOR/ffmpeg-build"
 OUTPUT="$VENDOR/ffmpeg"
 URL="https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz"
 SHA256="40973d44970dbc83ef302b0609f2e74982be2d85916dd2ee7472d30678a7abe6"
+MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
+
+export MACOSX_DEPLOYMENT_TARGET
 
 mkdir -p "$VENDOR"
 
@@ -24,10 +28,11 @@ if [[ "$ACTUAL_SHA256" != "$SHA256" ]]; then
   exit 1
 fi
 
-rm -rf "$SOURCE"
+rm -rf "$SOURCE" "$BUILD"
 /usr/bin/tar -xf "$ARCHIVE" -C "$VENDOR"
 
-cd "$VENDOR"
+mkdir -p "$BUILD"
+cd "$BUILD"
 "$SOURCE/configure" \
   --prefix="$VENDOR/install" \
   --cc=/usr/bin/clang \
@@ -47,11 +52,14 @@ cd "$VENDOR"
   --enable-protocol=file,pipe \
   --enable-demuxer=matroska,mov,mp3,wav,flac,ogg,aac \
   --enable-decoder=opus,vorbis,aac,alac,mp3,mp3float,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le,flac \
-  --enable-filter=aresample,aformat,pan \
+  --enable-filter=aresample,aformat,pan,ebur128,highpass,loudnorm \
   --enable-encoder=pcm_s16le \
-  --enable-muxer=wav,pcm_s16le
+  --enable-muxer=wav,pcm_s16le,null \
+  --extra-cflags="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
+  --extra-ldflags="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
 
 /usr/bin/make -j4 ffmpeg
+/usr/bin/ditto --noextattr --noqtn --norsrc "$BUILD/ffmpeg" "$OUTPUT"
 /bin/chmod +x "$OUTPUT"
 
 LICENSE_TEXT=$("$OUTPUT" -L 2>&1)
@@ -64,5 +72,8 @@ if [[ "$VERSION_TEXT" == *"--enable-gpl"* ]]; then
   echo "Ошибка: в конфигурации FFmpeg неожиданно включён GPL-код." >&2
   exit 1
 fi
+
+"$ROOT/scripts/audit_ffmpeg.sh" "$OUTPUT"
+"$ROOT/scripts/audit_macho.sh" "$OUTPUT" "$MACOSX_DEPLOYMENT_TARGET"
 
 echo "$OUTPUT"

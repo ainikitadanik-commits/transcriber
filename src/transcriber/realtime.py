@@ -20,6 +20,15 @@ PCM_BUFFER_SECONDS = 120
 PCM_BUFFER_LIMIT = (
     PCM_SAMPLE_RATE * PCM_CHANNELS * PCM_SAMPLE_WIDTH * PCM_BUFFER_SECONDS
 )
+PERMISSION_STATES = {
+    "disabled",
+    "unknown",
+    "requesting",
+    "granted",
+    "denied",
+    "managed_denied",
+    "unavailable",
+}
 
 
 class PCMBuffer:
@@ -70,6 +79,12 @@ class RealtimeCaptureManager:
             "message": "Готово к запуску.",
             "system_audio": False,
             "microphone": False,
+            "microphone_enabled": False,
+            "permissions": {
+                "system": "unknown",
+                "microphone": "unknown",
+            },
+            "error": None,
         }
         self._started_at: float | None = None
         self._audio = {
@@ -104,7 +119,7 @@ class RealtimeCaptureManager:
         )
         return state
 
-    def start(self) -> dict[str, Any]:
+    def start(self, *, include_microphone: bool = False) -> dict[str, Any]:
         helper = capture_helper_path()
         if not helper.is_file() or not os.access(helper, os.X_OK):
             raise RuntimeError(
@@ -117,9 +132,19 @@ class RealtimeCaptureManager:
                 raise RuntimeError("Рилтайм-захват уже запущен.")
             self._state = {
                 "status": "starting",
-                "message": "Разрешите macOS записывать экран и использовать микрофон.",
+                "message": (
+                    "Подтвердите доступ к системному звуку и микрофону."
+                    if include_microphone
+                    else "Подтвердите доступ к системному звуку."
+                ),
                 "system_audio": False,
                 "microphone": False,
+                "microphone_enabled": include_microphone,
+                "permissions": {
+                    "system": "requesting",
+                    "microphone": "requesting" if include_microphone else "disabled",
+                },
+                "error": None,
             }
             self._started_at = None
             self._audio = {
@@ -127,25 +152,26 @@ class RealtimeCaptureManager:
                 "microphone": PCMBuffer(),
             }
             system_read, system_write = os.pipe()
-            microphone_read, microphone_write = os.pipe()
+            microphone_read = microphone_write = None
+            command = [str(helper), "--system-fd", str(system_write)]
+            pass_fds = [system_write]
+            if include_microphone:
+                microphone_read, microphone_write = os.pipe()
+                command.extend(["--microphone-fd", str(microphone_write)])
+                pass_fds.append(microphone_write)
             try:
                 self._process = subprocess.Popen(
-                    [
-                        str(helper),
-                        "--system-fd",
-                        str(system_write),
-                        "--microphone-fd",
-                        str(microphone_write),
-                    ],
+                    command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1,
-                    pass_fds=(system_write, microphone_write),
+                    pass_fds=tuple(pass_fds),
                 )
             except OSError as error:
                 os.close(system_read)
-                os.close(microphone_read)
+                if microphone_read is not None:
+                    os.close(microphone_read)
                 self._state.update(
                     status="error",
                     message=f"Не удалось запустить локальный помощник: {error}",
@@ -153,7 +179,8 @@ class RealtimeCaptureManager:
                 raise RuntimeError(self._state["message"]) from error
             finally:
                 os.close(system_write)
-                os.close(microphone_write)
+                if microphone_write is not None:
+                    os.close(microphone_write)
             process = self._process
 
         threading.Thread(
@@ -161,11 +188,12 @@ class RealtimeCaptureManager:
             args=(process, "system", system_read),
             daemon=True,
         ).start()
-        threading.Thread(
-            target=self._read_pcm,
-            args=(process, "microphone", microphone_read),
-            daemon=True,
-        ).start()
+        if microphone_read is not None:
+            threading.Thread(
+                target=self._read_pcm,
+                args=(process, "microphone", microphone_read),
+                daemon=True,
+            ).start()
         threading.Thread(
             target=self._read_events, args=(process,), daemon=True
         ).start()
@@ -230,11 +258,33 @@ class RealtimeCaptureManager:
                 if process is not self._process:
                     return
                 if event_name == "started":
+                    microphone_enabled = bool(
+                        self._state.get("microphone_enabled", False)
+                    )
                     self._state.update(
                         status="recording",
-                        message="Захватываем системный звук и микрофон локально.",
+                        message=(
+                            "Захватываем системный звук и микрофон локально."
+                            if microphone_enabled
+                            else "Захватываем только системный звук локально."
+                        ),
                     )
+                    permissions = dict(self._state["permissions"])
+                    for source in ("system", "microphone"):
+                        if permissions[source] == "requesting":
+                            permissions[source] = "granted"
+                    self._state["permissions"] = permissions
                     self._started_at = time.monotonic()
+                elif event_name == "permission_state":
+                    source = event.get("source")
+                    permission_state = event.get("state")
+                    if (
+                        source in {"system", "microphone"}
+                        and permission_state in PERMISSION_STATES
+                    ):
+                        permissions = dict(self._state["permissions"])
+                        permissions[source] = permission_state
+                        self._state["permissions"] = permissions
                 elif event_name == "audio_detected":
                     source = event.get("source")
                     if source == "system":
@@ -242,9 +292,24 @@ class RealtimeCaptureManager:
                     elif source == "microphone":
                         self._state["microphone"] = True
                 elif event_name == "error":
+                    error = self._structured_error(event)
+                    source = error.get("source")
+                    if source in {"system", "microphone"}:
+                        state_by_code = {
+                            "permission_denied": "denied",
+                            "permission_restricted": "denied",
+                            "permission_managed_denied": "managed_denied",
+                            "device_unavailable": "unavailable",
+                        }
+                        permission_state = state_by_code.get(error["code"])
+                        if permission_state:
+                            permissions = dict(self._state["permissions"])
+                            permissions[source] = permission_state
+                            self._state["permissions"] = permissions
                     self._state.update(
                         status="error",
-                        message=self._friendly_error(str(event.get("message", ""))),
+                        message=self._error_message(error),
+                        error=error,
                     )
 
     def _wait(self, process: subprocess.Popen[str]) -> None:
@@ -261,21 +326,77 @@ class RealtimeCaptureManager:
                         message="Захват остановлен. Аудио не сохранялось на диск.",
                     )
                 else:
+                    error = {
+                        "code": "capture_process_failed",
+                        "domain": "runtime",
+                        "native_code": return_code,
+                        "source": None,
+                        "retryable": True,
+                        "details": stderr,
+                    }
                     self._state.update(
                         status="error",
-                        message=self._friendly_error(stderr),
+                        message=self._error_message(error),
+                        error=error,
                     )
             self._started_at = None
 
     @staticmethod
+    def _structured_error(event: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "code": str(event.get("error_code") or "capture_failed"),
+            "domain": str(event.get("error_domain") or "capture"),
+            "native_code": event.get("native_code"),
+            "source": event.get("source"),
+            "retryable": bool(event.get("retryable", False)),
+            "details": str(event.get("message") or ""),
+        }
+
+    @staticmethod
+    def _error_message(error: dict[str, Any]) -> str:
+        code = error["code"]
+        source = error.get("source")
+        if code in {"permission_denied", "permission_restricted"}:
+            target = (
+                "к системному звуку"
+                if source == "system"
+                else "к микрофону"
+                if source == "microphone"
+                else "к звуку"
+            )
+            return (
+                f"macOS не предоставила доступ {target}. "
+                "Повторите запуск и подтвердите системный запрос."
+            )
+        if code == "permission_managed_denied":
+            return (
+                "Доступ к звуку запрещён политикой устройства. "
+                "Приложение не может обойти это ограничение."
+            )
+        if code == "device_unavailable":
+            return "Источник звука недоступен. Проверьте выбранное аудиоустройство."
+        details = error.get("details") or "неизвестная ошибка"
+        return f"Не удалось запустить захват звука: {details}"
+
+    @staticmethod
     def _friendly_error(details: str) -> str:
         lowered = details.lower()
-        if "permission" in lowered or "denied" in lowered:
+        if (
+            "permission" in lowered
+            or "denied" in lowered
+            or "userdeclined" in lowered
+        ):
             return (
-                "Нет разрешения macOS. Разрешите запись экрана и микрофон "
-                "для Terminal или транскрибатора в Системных настройках."
+                "Нет разрешения macOS на системный звук или микрофон. "
+                "Проверьте доступ Транскрибатора в Системных настройках."
             )
-        return f"Не удалось запустить захват звука: {details or 'неизвестная ошибка'}"
+        return RealtimeCaptureManager._error_message(
+            {
+                "code": "capture_failed",
+                "source": None,
+                "details": details,
+            }
+        )
 
 
 capture_manager = RealtimeCaptureManager()

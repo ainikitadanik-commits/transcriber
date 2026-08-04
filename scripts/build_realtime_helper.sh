@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="${0:A:h:h}"
 OUTPUT="$ROOT/build/realtime-capture"
-SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk"
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
 MODULE_CACHE="$ROOT/build/swift-module-cache"
 
 mkdir -p "${OUTPUT:h}" "$MODULE_CACHE"
@@ -16,8 +16,9 @@ xcrun swiftc \
   -target arm64-apple-macos15.0 \
   -framework AppKit \
   -framework AVFoundation \
-  -framework CoreMedia \
-  -framework ScreenCaptureKit \
+  -framework CoreAudio \
+  -framework UniformTypeIdentifiers \
+  -framework WebKit \
   "$ROOT/native/realtime_capture.swift" \
   -o "$OUTPUT"
 

@@ -244,6 +244,87 @@ def extract_audio_chunk(
     subprocess.run(command, check=True, capture_output=True, text=True)
 
 
+def extract_wav_chunk(
+    audio_path: Path,
+    output_path: Path,
+    start: float,
+    end: float,
+) -> None:
+    with wave.open(str(audio_path), "rb") as source:
+        rate = source.getframerate()
+        start_frame = min(source.getnframes(), max(0, int(start * rate)))
+        frame_count = max(0, int((end - start) * rate))
+        source.setpos(start_frame)
+        content = source.readframes(frame_count)
+        params = source.getparams()
+    with wave.open(str(output_path), "wb") as target:
+        target.setparams(params)
+        target.writeframes(content)
+
+
+def _remove_text_overlap(previous: str, current: str) -> str:
+    previous_tokens = previous.split()
+    current_tokens = current.split()
+    maximum = min(len(previous_tokens), len(current_tokens), 16)
+    for size in range(maximum, 0, -1):
+        previous_tail = [token.casefold() for token in previous_tokens[-size:]]
+        current_head = [token.casefold() for token in current_tokens[:size]]
+        if previous_tail == current_head:
+            return " ".join(current_tokens[size:])
+    return current
+
+
+def transcribe_audio_windows(
+    audio_path: Path,
+    device: str,
+    maximum_window: float = 20.0,
+    context: float = 0.75,
+    model_loader: Callable[[str], Any] | None = None,
+) -> list[Segment]:
+    if maximum_window <= 0 or maximum_window + 2 * context > 25:
+        raise ValueError("Окно распознавания должно помещаться в лимит 25 секунд.")
+
+    model = (model_loader or load_model)(device)
+    duration = audio_duration(audio_path)
+    segments: list[Segment] = []
+    core_start = 0.0
+    window_index = 0
+    while core_start < duration:
+        core_end = min(duration, core_start + maximum_window)
+        extract_start = max(0.0, core_start - context)
+        extract_end = min(duration, core_end + context)
+        chunk_path = audio_path.parent / f"window-{window_index:04}.wav"
+        extract_wav_chunk(audio_path, chunk_path, extract_start, extract_end)
+        result = model.transcribe(str(chunk_path), word_timestamps=True)
+        words = tuple(
+            Word(
+                float(word.start) + extract_start,
+                float(word.end) + extract_start,
+                str(word.text).strip(),
+            )
+            for word in (getattr(result, "words", None) or [])
+            if str(word.text).strip()
+            and core_start - 0.02
+            <= (float(word.start) + float(word.end)) / 2 + extract_start
+            < core_end + 0.02
+        )
+        if words:
+            text = _join_words(list(words))
+            segments.append(
+                Segment(words[0].start, words[-1].end, text, words=words)
+            )
+        else:
+            text = str(getattr(result, "text", "")).strip()
+            if text:
+                if segments:
+                    text = _remove_text_overlap(segments[-1].text, text)
+                if text:
+                    segments.append(Segment(core_start, core_end, text))
+        core_start = core_end
+        window_index += 1
+    return segments
+
+
 def recover_missing_segments(
     model: Any,
     audio_path: Path,
@@ -722,6 +803,7 @@ def build_document(
     enhancement_mode: str = "off",
     enhancement_applied: bool = False,
     model_name: str = MODEL_NAME,
+    local_windowing: bool = False,
     part_metadata: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     input_paths = [input_path] if isinstance(input_path, Path) else input_path
@@ -756,7 +838,7 @@ def build_document(
         },
         "processing": {
             "model": model_name,
-            "mode": "longform",
+            "mode": "local_windows" if local_windowing else "longform",
             "device_requested": requested_device,
             "device_used": used_device,
             "cpu_fallback_used": fallback_used,
@@ -822,6 +904,7 @@ def run(
     recover_gaps: bool = True,
     enhancement_mode: str = "auto",
     model_name: str = MODEL_NAME,
+    local_windowing: bool = False,
     model_loader: Callable[[str], Any] = load_model,
     diarization_loader: Callable[[str], Any] = load_diarization_pipeline,
     progress_callback: Callable[[int, str, str], None] | None = None,
@@ -905,13 +988,20 @@ def run(
             combine_wav_parts(normalized_parts, normalized_audio)
         report(18, "preparing", "Аудио подготовлено, запускаем модель…")
         try:
-            segments = transcribe_audio(
-                normalized_audio,
-                device,
-                batch_size,
-                word_timestamps=diarization,
-                model_loader=tracked_model_loader,
-            )
+            if local_windowing:
+                segments = transcribe_audio_windows(
+                    normalized_audio,
+                    device,
+                    model_loader=tracked_model_loader,
+                )
+            else:
+                segments = transcribe_audio(
+                    normalized_audio,
+                    device,
+                    batch_size,
+                    word_timestamps=diarization,
+                    model_loader=tracked_model_loader,
+                )
         except TranscriptionError:
             raise
         except RuntimeError as error:
@@ -919,13 +1009,20 @@ def run(
                 raise
             fallback_used = True
             device = "cpu"
-            segments = transcribe_audio(
-                normalized_audio,
-                device,
-                batch_size,
-                word_timestamps=diarization,
-                model_loader=tracked_model_loader,
-            )
+            if local_windowing:
+                segments = transcribe_audio_windows(
+                    normalized_audio,
+                    device,
+                    model_loader=tracked_model_loader,
+                )
+            else:
+                segments = transcribe_audio(
+                    normalized_audio,
+                    device,
+                    batch_size,
+                    word_timestamps=diarization,
+                    model_loader=tracked_model_loader,
+                )
 
         report(72, "transcribing", "Основное распознавание завершено…")
 
@@ -984,24 +1081,25 @@ def run(
     report(97, "exporting", "Формируем TXT, JSON и DOCX…")
     elapsed = time.monotonic() - started
     document = build_document(
-        sources,
-        segments,
-        requested_device,
-        device,
-        batch_size,
-        fallback_used,
-        started_at,
-        elapsed,
-        diarization,
-        diarization_device,
-        speaker_count,
-        recover_gaps,
-        recovered_count,
-        recovery_device,
-        enhancement_mode,
-        enhancement_applied,
-        model_name,
-        part_metadata,
+        input_path=sources,
+        segments=segments,
+        requested_device=requested_device,
+        used_device=device,
+        batch_size=batch_size,
+        fallback_used=fallback_used,
+        started_at=started_at,
+        elapsed_seconds=elapsed,
+        diarization_enabled=diarization,
+        diarization_device=diarization_device,
+        speaker_count_requested=speaker_count,
+        recovery_enabled=recover_gaps,
+        recovered_segments=recovered_count,
+        recovery_device=recovery_device,
+        enhancement_mode=enhancement_mode,
+        enhancement_applied=enhancement_applied,
+        model_name=model_name,
+        local_windowing=local_windowing,
+        part_metadata=part_metadata,
     )
     output_stem = sources[0].stem
     if len(sources) > 1:

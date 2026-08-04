@@ -1,25 +1,29 @@
 # Архитектура системы
 
 Статус: каноническая архитектура
-Актуально на: 2026-07-20
+Актуально на: 2026-08-04
 
 ## Контекст
 
-Приложение выполняется целиком на одном Mac. Внешняя сеть допустима только на
-этапе получения разрешённых моделей pyannote. Обработка записей и текста
-находится внутри локальной границы доверия.
+Приложение выполняется целиком на одном Mac. Базовая файловая транскрибация
+использует bundled GigaAM offline и не требует pyannote models, HF token или
+сети. Внешняя сеть допустима только для явно включённой diarization:
+пользователь принимает условия gated pyannote-модели и временно вводит Read
+token. Обработка записей и текста находится внутри локальной границы доверия.
 
 ## Компоненты
 
 | Компонент | Реализация | Ответственность |
 | --- | --- | --- |
-| macOS shell | `native/realtime_capture.swift` | идентичность `.app`, menu bar, запуск runtime, системные разрешения, realtime capture |
+| macOS shell | `native/realtime_capture.swift` | идентичность `.app`, отдельное WKWebView-окно, Dock/menu bar, запуск runtime, системные разрешения, realtime capture |
 | локальный runtime | PyInstaller + Python | Flask UI, pipeline, модели и экспорт |
 | web UI | Flask, HTML, CSS, JS | выбор параметров, запуск, статусы, результаты |
 | CLI | `transcriber.cli` | технический файловый сценарий |
 | pipeline | `transcriber.core` | валидация, FFmpeg, ASR, recovery, diarization, экспорт |
 | model/storage layer | `transcriber.models` | пути данных, кэши и получение моделей |
-| realtime manager | `transcriber.realtime` | дочерний capture-процесс, события и PCM-буферы |
+| realtime capture | `transcriber.realtime` | дочерний capture-процесс, события и PCM-буферы |
+| realtime ASR | `transcriber.realtime_asr`, `transcriber.gigaam_realtime` | окна, overlap/dedup и локальный GigaAM adapter |
+| realtime service | `transcriber.realtime_service` | lifecycle, live state, finalization и export |
 | media layer | FFmpeg 7.1 | локальная нормализация контейнеров и PCM |
 | ASR | GigaAM | long-form распознавание |
 | VAD/diarization | pyannote | сегментация речи и условные спикеры |
@@ -32,7 +36,8 @@
 3. Если собственный runtime ещё не запущен, shell запускает
    `transcriber-runtime --no-browser`.
 4. Runtime поднимает Flask на `127.0.0.1:7860`.
-5. Shell открывает интерфейс в браузере и остаётся в menu bar.
+5. Shell показывает локальный UI в собственном WKWebView-окне; браузер для
+   интерфейса не запускается.
 6. При realtime shell запускается повторно как capture helper и пишет события
    и два PCM-потока в pipes родительского Python-процесса.
 7. Завершение из меню останавливает дочерний runtime.
@@ -58,17 +63,19 @@
 ## Realtime-поток
 
 ```text
-ScreenCaptureKit system audio ---> resample mono 16 kHz ---> pipe ---> PCMBuffer
-AVFoundation microphone ---------> resample mono 16 kHz ---> pipe ---> PCMBuffer
-                                                                |
-                                               planned window scheduler
-                                                                |
-                                                       GigaAM short ASR
-                                                                |
-                                                     live transcript/export
+Core Audio Tap system audio ---> resample mono 16 kHz ---> pipe ---> PCMBuffer
+AVAudioEngine microphone ------> resample mono 16 kHz ---> pipe ---> PCMBuffer
+                                                               |
+                                             bounded window scheduler
+                                                               |
+                                                   GigaAM short ASR
+                                                               |
+                                                live state + local export
 ```
 
-Текущая граница реализации заканчивается на `PCMBuffer`.
+Весь внутренний контур реализован и покрыт автоматическими тестами. Его
+product-ready статус остаётся заблокированным до signed TCC dual-source
+acceptance на чистом корпоративном no-admin Mac.
 
 ## Хранилище
 
@@ -83,7 +90,7 @@ AVFoundation microphone ---------> resample mono 16 kHz ---> pipe ---> PCMBuffer
 | `input/` | сохранённые пользовательские загрузки | пользователь удаляет вручную |
 | `output/` | TXT, JSON, DOCX | пользователь удаляет вручную |
 | `models/gigaam/` | локальные веса при source-установке | сохраняются между запусками |
-| `models/huggingface/` | pyannote cache | сохраняется между запусками |
+| `models/huggingface/` | optional gated pyannote cache для diarization | сохраняется между запусками |
 | `logs/` | локальные журналы | политика ротации пока открыта |
 
 В продуктовой `.app` веса GigaAM находятся также внутри Resources. Путь
@@ -106,8 +113,8 @@ AVFoundation microphone ---------> resample mono 16 kHz ---> pipe ---> PCMBuffer
 - нет постоянного каталога задач и восстановления незавершённой обработки;
 - endpoint скачивания опирается на имя файла в общей `output/`;
 - нет ротации логов;
-- realtime manager ещё не имеет оконного scheduler и состояния итогового
-  документа;
+- live signed Core Audio Tap + microphone TCC acceptance ещё не выполнен;
+- realtime не прошёл 30-минутный packaged сценарий;
 - проверки качества речи в основном требуют реальных аудиофикстур.
 
 Эти ограничения не являются разрешением на случайную переработку. Их изменение
