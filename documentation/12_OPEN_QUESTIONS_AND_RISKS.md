@@ -57,8 +57,8 @@
 
 - `README.md` всё ещё начинает пользовательский путь с legacy release 0.1.1 и
   `.command`, тогда как целевой путь уже product `.app`;
-- product version 0.2.1 есть в `pyproject.toml` и `Info.plist`, но внешний
-  release 0.2.1 не опубликован;
+- internal release 0.2.1 опубликован; исправляющая версия 0.2.2 есть в
+  `pyproject.toml` и `Info.plist`, но ещё не опубликована;
 - realtime core/API/UI и export реализованы, но signed dual-source TCC
   acceptance отсутствует;
 - internal candidate подписан ad hoc и не проходит внешний

@@ -3,10 +3,13 @@ import AVFoundation
 import CoreAudio
 import Darwin
 import Foundation
+import UniformTypeIdentifiers
 import WebKit
 
 @MainActor
-final class ProductApplicationDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
+    WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate
+{
     private struct RuntimeMarker: Codable {
         let buildID: String
         let instanceID: String
@@ -365,6 +368,7 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate, WKNavig
             let configuration = WKWebViewConfiguration()
             let view = WKWebView(frame: .zero, configuration: configuration)
             view.navigationDelegate = self
+            view.uiDelegate = self
 
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1180, height: 820),
@@ -374,6 +378,7 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate, WKNavig
             )
             window.title = "Транскрибатор"
             window.minSize = NSSize(width: 760, height: 640)
+            window.isReleasedWhenClosed = false
             window.contentView = view
             window.center()
             window.setFrameAutosaveName("TranscriberMainWindow")
@@ -413,6 +418,90 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate, WKNavig
             NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
         }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [
+            "webm", "mp4", "wav", "mp3", "m4a", "flac", "ogg", "aac",
+        ].compactMap { UTType(filenameExtension: $0) }
+        guard let window = webView.window else {
+            completionHandler(nil)
+            return
+        }
+        panel.beginSheetModal(for: window) { response in
+            completionHandler(response == .OK ? panel.urls : nil)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        guard let url = navigationResponse.response.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        let isLocalResult = url.host == "127.0.0.1"
+            && url.port == 7_860
+            && url.path.hasPrefix("/files/")
+        decisionHandler(isLocalResult ? .download : .allow)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationAction: WKNavigationAction,
+        didBecome download: WKDownload
+    ) {
+        download.delegate = self
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationResponse: WKNavigationResponse,
+        didBecome download: WKDownload
+    ) {
+        download.delegate = self
+    }
+
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String,
+        completionHandler: @escaping (URL?) -> Void
+    ) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedFilename
+        panel.directoryURL = FileManager.default.urls(
+            for: .downloadsDirectory,
+            in: .userDomainMask
+        ).first
+        guard let window = interfaceWindow else {
+            completionHandler(nil)
+            return
+        }
+        panel.beginSheetModal(for: window) { result in
+            completionHandler(result == .OK ? panel.url : nil)
+        }
+    }
+
+    func downloadDidFinish(_ download: WKDownload) {}
+
+    func download(
+        _ download: WKDownload,
+        didFailWithError error: Error,
+        resumeData: Data?
+    ) {
+        showError("Не удалось сохранить транскрипцию: \(error.localizedDescription)")
     }
 
     private func showError(_ message: String) {

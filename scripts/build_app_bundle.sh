@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
-VERSION="0.2.1"
+VERSION="0.2.2"
 BUILD_ROOT="$ROOT/build/product"
 DIST_ROOT="$ROOT/dist"
 RUNTIME="$DIST_ROOT/transcriber-runtime"
@@ -158,6 +158,7 @@ xcrun swiftc \
   -framework AVFoundation \
   -framework CoreAudio \
   -framework CoreMedia \
+  -framework UniformTypeIdentifiers \
   -framework WebKit \
   "$ROOT/native/realtime_capture.swift" \
   -o "$CONTENTS/MacOS/Transcriber"

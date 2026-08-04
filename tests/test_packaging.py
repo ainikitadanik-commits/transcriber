@@ -47,7 +47,7 @@ class PackagingTests(unittest.TestCase):
         )
         self.assertEqual(info["CFBundleExecutable"], "Transcriber")
         self.assertEqual(info["CFBundleIconFile"], "Transcriber.icns")
-        self.assertEqual(info["CFBundleShortVersionString"], "0.2.1")
+        self.assertEqual(info["CFBundleShortVersionString"], "0.2.2")
         self.assertFalse(info.get("LSUIElement", False))
         self.assertIn("локальной транскрибации", info["NSMicrophoneUsageDescription"])
         self.assertIn("локальной транскрибации", info["NSAudioCaptureUsageDescription"])
