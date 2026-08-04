@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-gigaam-transcriber"
-version = "0.2.0"
+version = "0.2.1"
 description = "Local long-form meeting transcription with GigaAM"
 requires-python = ">=3.11,<3.13"
 dependencies = [

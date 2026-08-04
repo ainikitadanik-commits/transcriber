@@ -47,7 +47,7 @@ class PackagingTests(unittest.TestCase):
         )
         self.assertEqual(info["CFBundleExecutable"], "Transcriber")
         self.assertEqual(info["CFBundleIconFile"], "Transcriber.icns")
-        self.assertEqual(info["CFBundleShortVersionString"], "0.2.0")
+        self.assertEqual(info["CFBundleShortVersionString"], "0.2.1")
         self.assertFalse(info.get("LSUIElement", False))
         self.assertIn("локальной транскрибации", info["NSMicrophoneUsageDescription"])
         self.assertIn("локальной транскрибации", info["NSAudioCaptureUsageDescription"])
@@ -217,7 +217,8 @@ class PackagingTests(unittest.TestCase):
         script = (ROOT / "scripts/build_internal_admin_dmg.sh").read_text()
         guide = (ROOT / "packaging/КАК ЗАПУСТИТЬ INTERNAL DMG.txt").read_text()
 
-        self.assertIn("INTERNAL-UNNOTARIZED", script)
+        self.assertIn("INTERNAL", script)
+        self.assertIn("build-$BUILD", script)
         self.assertIn("Signature=adhoc", script)
         self.assertIn("audit_macho.sh", script)
         self.assertIn("audit_ffmpeg.sh", script)

@@ -16,6 +16,8 @@ fi
 
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
   "$APP/Contents/Info.plist")
+BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+  "$APP/Contents/Info.plist")
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
   "$APP/Contents/Info.plist")
 SIGNATURE_INFO=$(/usr/bin/codesign -dvvv "$APP" 2>&1 || true)
@@ -44,7 +46,7 @@ fi
 /usr/bin/ditto "$GUIDE" "$STAGING/КАК ЗАПУСТИТЬ.txt"
 /bin/ln -s /Applications "$STAGING/Applications"
 
-ASSET_NAME="Transcriber-$VERSION-INTERNAL-UNNOTARIZED-macOS-arm64"
+ASSET_NAME="Транскрибатор-$VERSION-build-$BUILD-INTERNAL-macOS-arm64"
 DMG="$DIST_ROOT/$ASSET_NAME.dmg"
 SHA_FILE="$DMG.sha256"
 MANIFEST="$DMG.manifest.txt"
@@ -63,6 +65,7 @@ printf '%s  %s\n' "$DMG_SHA" "${DMG:t}" > "$SHA_FILE"
 {
   printf 'product=Транскрибатор\n'
   printf 'version=%s\n' "$VERSION"
+  printf 'build=%s\n' "$BUILD"
   printf 'bundle_id=%s\n' "$BUNDLE_ID"
   printf 'architecture=arm64\n'
   printf 'minimum_macos=15.0\n'
