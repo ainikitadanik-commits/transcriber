@@ -883,6 +883,14 @@ def write_outputs(
     output_dir: Path, stem: str, txt: str, document: dict[str, Any]
 ) -> tuple[Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    original_stem = stem
+    index = 2
+    while any(
+        (output_dir / f"{stem}.{extension}").exists()
+        for extension in ("txt", "json", "docx")
+    ):
+        stem = f"{original_stem}-{index}"
+        index += 1
     txt_path = output_dir / f"{stem}.txt"
     json_path = output_dir / f"{stem}.json"
     docx_path = output_dir / f"{stem}.docx"

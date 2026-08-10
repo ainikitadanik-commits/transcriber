@@ -47,10 +47,18 @@ class PackagingTests(unittest.TestCase):
         )
         self.assertEqual(info["CFBundleExecutable"], "Transcriber")
         self.assertEqual(info["CFBundleIconFile"], "Transcriber.icns")
-        self.assertEqual(info["CFBundleShortVersionString"], "0.2.2")
+        self.assertEqual(info["CFBundleShortVersionString"], "0.2.3")
         self.assertFalse(info.get("LSUIElement", False))
         self.assertIn("локальной транскрибации", info["NSMicrophoneUsageDescription"])
         self.assertIn("локальной транскрибации", info["NSAudioCaptureUsageDescription"])
+
+    def test_native_downloads_use_free_names_and_atomic_replacement(self):
+        source = (ROOT / "native/realtime_capture.swift").read_text()
+
+        self.assertIn("availableFilename(", source)
+        self.assertIn(".transcriber-", source)
+        self.assertIn("replaceItemAt(", source)
+        self.assertIn("downloadDidFinish", source)
 
     def test_audio_input_entitlement_is_enabled(self):
         with (

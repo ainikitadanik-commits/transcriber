@@ -34,10 +34,15 @@ class FakePipeline:
         return next(self.outputs)
 
 
-def output(tracks, embeddings):
+def output(tracks, embeddings, *, profile_tracks=None):
     return SimpleNamespace(
+        speaker_diarization=FakeAnnotation(profile_tracks or tracks),
         exclusive_speaker_diarization=FakeAnnotation(tracks),
-        speaker_embeddings=np.asarray(embeddings, dtype=np.float32),
+        speaker_embeddings=(
+            None
+            if embeddings is None
+            else np.asarray(embeddings, dtype=np.float32)
+        ),
     )
 
 
@@ -69,6 +74,36 @@ class RealtimeDiarizationTests(unittest.TestCase):
         diarizer = PyannoteRealtimeDiarizer(pipeline)
 
         self.assertEqual(diarizer("microphone", b"\0\0", 16_000), ())
+
+    def test_embeddings_follow_full_diarization_labels(self):
+        pipeline = FakePipeline(
+            [
+                output(
+                    [(0.0, 1.0, "A")],
+                    [[1.0, 0.0], [0.0, 1.0]],
+                    profile_tracks=[
+                        (0.0, 1.0, "A"),
+                        (0.5, 1.0, "B"),
+                    ],
+                )
+            ]
+        )
+        diarizer = PyannoteRealtimeDiarizer(pipeline)
+
+        turns = diarizer("system", b"\0\0" * 16_000, 16_000)
+
+        self.assertEqual([turn.speaker for turn in turns], ["Спикер 1"])
+
+    def test_missing_embeddings_keep_turns_with_unknown_speaker(self):
+        pipeline = FakePipeline([output([(0.0, 1.0, "A")], None)])
+        diarizer = PyannoteRealtimeDiarizer(pipeline)
+
+        turns = diarizer("system", b"\0\0" * 16_000, 16_000)
+
+        self.assertEqual(
+            [turn.speaker for turn in turns],
+            ["Спикер не определён"],
+        )
 
 
 if __name__ == "__main__":

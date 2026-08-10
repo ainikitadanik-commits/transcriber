@@ -41,7 +41,7 @@
 | R-006 | P0 | Dependency telemetry нарушает local-only policy | pyannote metrics отключаются до импорта; base mode не требует pyannote models, HF token или сети | нужен packaged network observation для optional diarization |
 | R-007 | P1 | Product build поддерживает меньше контейнеров, чем README | LGPL/network-disabled capability audit проходит | нужна полная artifact format matrix |
 | R-008 | P2 | Общий singleton job ограничивает надёжность | запрет второй задачи | state теряется при restart |
-| R-009 | P2 | Общая output-папка создаёт коллизии имён | job inputs изолированы | outputs не namespaced |
+| R-009 | P2 | Общая output-папка создаёт коллизии имён | комплекты получают общий свободный индекс; существующие результаты не перезаписываются | повторить packaged acceptance одинаковых имён |
 | R-010 | P2 | Документация и UI обещают больше, чем доказано | realtime core/API/UI реализованы | не объявлять product-ready до signed TCC и 30-минутного E2E |
 | R-011 | P1 | Лицензии меняются вместе с dependency graph | auto collection + ledger | пересобирать каждый релиз |
 | R-012 | P2 | Логи/inputs растут без ограничений | Finder access | нет retention policy |
@@ -57,8 +57,8 @@
 
 - `README.md` всё ещё начинает пользовательский путь с legacy release 0.1.1 и
   `.command`, тогда как целевой путь уже product `.app`;
-- internal release 0.2.1 опубликован; исправляющая версия 0.2.2 есть в
-  `pyproject.toml` и `Info.plist`, но ещё не опубликована;
+- internal release 0.2.2 опубликован; исправляющая версия 0.2.3 готовится в
+  `pyproject.toml` и `Info.plist`;
 - realtime core/API/UI и export реализованы, но signed dual-source TCC
   acceptance отсутствует;
 - internal candidate подписан ad hoc и не проходит внешний

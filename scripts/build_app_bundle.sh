@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
-VERSION="0.2.2"
+VERSION="0.2.3"
 BUILD_ROOT="$ROOT/build/product"
 DIST_ROOT="$ROOT/dist"
 RUNTIME="$DIST_ROOT/transcriber-runtime"

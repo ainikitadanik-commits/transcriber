@@ -936,6 +936,7 @@ select:disabled {
 }
 
 .download {
+  min-height: 39px;
   padding: 10px 13px;
   border: 1px solid transparent;
   border-radius: 11px;
@@ -944,6 +945,9 @@ select:disabled {
   text-decoration: none;
   font-size: 13px;
   font-weight: 700;
+  font-family: inherit;
+  line-height: 1.2;
+  cursor: pointer;
 }
 
 .download.secondary {

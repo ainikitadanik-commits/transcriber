@@ -138,6 +138,39 @@ class CoreTests(unittest.TestCase):
         )
         self.assertTrue(docx_created)
 
+    def test_repeated_output_stem_preserves_each_result_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            document = {"schema_version": "1.3", "segments": []}
+
+            with patch(
+                "transcriber.core.write_docx",
+                side_effect=lambda path, _document: path.write_bytes(b"docx"),
+            ):
+                first = write_outputs(output_dir, "C1-speakers", "первый", document)
+                second = write_outputs(output_dir, "C1-speakers", "второй", document)
+                third = write_outputs(output_dir, "C1-speakers", "третий", document)
+
+            self.assertEqual(
+                [[path.name for path in result] for result in (first, second, third)],
+                [
+                    ["C1-speakers.txt", "C1-speakers.json", "C1-speakers.docx"],
+                    [
+                        "C1-speakers-2.txt",
+                        "C1-speakers-2.json",
+                        "C1-speakers-2.docx",
+                    ],
+                    [
+                        "C1-speakers-3.txt",
+                        "C1-speakers-3.json",
+                        "C1-speakers-3.docx",
+                    ],
+                ],
+            )
+            self.assertEqual(first[0].read_text(), "первый")
+            self.assertEqual(second[0].read_text(), "второй")
+            self.assertEqual(third[0].read_text(), "третий")
+
     def test_auto_audio_enhancement_uses_measured_loudness(self):
         result = type(
             "Result",

@@ -34,6 +34,8 @@ const liveDownloads = document.querySelector("#live-downloads");
 const liveTxtLink = document.querySelector("#live-txt-link");
 const liveJsonLink = document.querySelector("#live-json-link");
 const liveDocxLink = document.querySelector("#live-docx-link");
+const revealResult = document.querySelector("#reveal-result");
+const liveRevealResult = document.querySelector("#live-reveal-result");
 
 function selectMode(mode) {
   const liveMode = mode === "live";
@@ -153,6 +155,7 @@ function renderRealtimeDownloads(state) {
   files.forEach(([link, name]) => {
     link.href = `/files/${encodeURIComponent(name)}`;
   });
+  liveRevealResult.dataset.filename = state.docx_name;
 }
 
 function renderRealtime(state) {
@@ -187,8 +190,9 @@ function renderRealtime(state) {
   liveModePanel.classList.toggle("is-recording", state.asr_status === "running");
   liveTimer.textContent = formatDuration(state.elapsed_seconds || 0);
   liveTimer.setAttribute("datetime", `PT${state.elapsed_seconds || 0}S`);
+  const diarizationWarning = asrActive ? state.diarization_warning : null;
   setTextIfChanged(liveNotice, state.available
-    ? (state.asr_message || state.message || "Готово к встрече.")
+    ? (diarizationWarning || state.asr_message || state.message || "Готово к встрече.")
     : "Помощник захвата не собран. Перезапустите транскрибатор после обновления.");
   const waitingLabel = state.status === "starting"
     ? "проверяем"
@@ -514,6 +518,7 @@ async function poll(jobId) {
     document.querySelector("#txt-link").href = `/files/${encodeURIComponent(data.txt_name)}`;
     document.querySelector("#docx-link").href = `/files/${encodeURIComponent(data.docx_name)}`;
     document.querySelector("#json-link").href = `/files/${encodeURIComponent(data.json_name)}`;
+    revealResult.dataset.filename = data.docx_name;
     setSubmitLoading(false);
     return;
   }
@@ -573,4 +578,27 @@ document.querySelectorAll("[data-open-folder]").forEach((button) => {
       button.disabled = false;
     }
   });
+});
+
+async function showResultInFinder(button) {
+  const filename = button.dataset.filename;
+  if (!filename) return;
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/reveal-file/${encodeURIComponent(filename)}`, {
+      method: "POST",
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось показать результат.");
+  } catch (error) {
+    folderMessage.textContent = error.message;
+    folderMessage.classList.remove("hidden");
+    folderMessage.classList.add("error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+[revealResult, liveRevealResult].forEach((button) => {
+  button.addEventListener("click", () => showResultInFinder(button));
 });
