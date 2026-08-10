@@ -13,14 +13,18 @@
 
 ## Скачать готовую версию для Mac
 
-Внешний DMG версии 0.2.3 пока не опубликован: на машине сборки отсутствуют
-Developer ID identity и Apple notary profile. Старый ad-hoc DMG 0.1.1 является
-архивным и не предназначен для передачи коллегам.
+Внутренняя версия 0.2.3 опубликована в
+[GitHub Releases](https://github.com/ainikitadanik-commits/transcriber/releases/tag/v0.2.3).
+Скачайте `Transcriber-0.2.3-build-205-INTERNAL-macOS-arm64.dmg`; рядом
+опубликованы SHA-256 и manifest сборки. Пошаговое использование описано в
+[руководстве пользователя](docs/USER_GUIDE_0.2.3.md).
 
-Готовым считается только файл `Transcriber-0.2.3-macOS-arm64.dmg`, рядом с
-которым находятся `.sha256` и `.manifest.txt`. Он должен быть подписан
-Developer ID, нотариализован, stapled и проверен Gatekeeper. Установка
-выполняется в `~/Applications` без admin-прав по инструкции внутри DMG.
+Сборка имеет статус `INTERNAL / UNNOTARIZED`: она предназначена для внутренней
+проверки на Mac с Apple Silicon и macOS 15 или новее. При первом запуске macOS
+потребует подтверждение в разделе «Конфиденциальность и безопасность» и права
+администратора. Не отключайте Gatekeeper и не обходите корпоративную
+MDM-политику. Для внешнего распространения по-прежнему необходимы Developer ID,
+notarization, stapling и отдельная проверка Gatekeeper.
 
 ### Первый запуск
 
