@@ -186,6 +186,34 @@ class RealtimeASRTests(unittest.TestCase):
         )
         self.assertEqual(diarizer_calls, [(SOURCE_SYSTEM, 64_000, SAMPLE_RATE)])
 
+    def test_diarization_failure_does_not_stop_realtime_asr(self):
+        result = RealtimeASRResult(
+            text="текст продолжается",
+            words=(
+                RealtimeWord(0.1, 0.4, "текст"),
+                RealtimeWord(0.4, 0.8, "продолжается"),
+            ),
+        )
+
+        def failing_diarizer(*_args):
+            raise RuntimeError("несогласованные голоса")
+
+        session = RealtimeASRSession(
+            lambda *_args: result,
+            diarizer=failing_diarizer,
+            sources=(SOURCE_SYSTEM,),
+            window_seconds=1.0,
+            overlap_seconds=0.2,
+        )
+        session.push(SOURCE_SYSTEM, silent_pcm(1.0))
+
+        snapshot = session.process_ready(max_windows=1)
+
+        segment = snapshot.provisional[SOURCE_SYSTEM]
+        self.assertEqual(segment.text, "текст продолжается")
+        self.assertEqual(segment.speaker, "Спикер не определён")
+        self.assertIn("Распознавание продолжается", snapshot.diarization_warning)
+
     def test_push_applies_backpressure_without_mutating_buffer(self):
         session = RealtimeASRSession(
             lambda *_args: "",

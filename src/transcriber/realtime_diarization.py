@@ -53,15 +53,18 @@ class PyannoteRealtimeDiarizer:
                 {"waveform": waveform, "sample_rate": sample_rate}
             )
             annotation = output.exclusive_speaker_diarization
-            embeddings = np.asarray(output.speaker_embeddings)
-            local_labels = list(annotation.labels())
-            mapping = self._match_profiles(local_labels, embeddings, np)
+            profile_labels = list(output.speaker_diarization.labels())
+            if output.speaker_embeddings is None:
+                mapping = {}
+            else:
+                embeddings = np.asarray(output.speaker_embeddings)
+                mapping = self._match_profiles(profile_labels, embeddings, np)
 
         return tuple(
             RealtimeSpeakerTurn(
                 start=float(turn.start),
                 end=float(turn.end),
-                speaker=mapping[label],
+                speaker=mapping.get(label, "Спикер не определён"),
             )
             for turn, _, label in annotation.itertracks(yield_label=True)
         )

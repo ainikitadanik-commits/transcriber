@@ -71,6 +71,7 @@ class RealtimeSnapshot:
     buffered_seconds: dict[str, float]
     backlogged_windows: dict[str, int]
     finalized: bool
+    diarization_warning: str | None
 
 
 @dataclass
@@ -150,6 +151,7 @@ class RealtimeASRSession:
         self._committed: deque[RealtimeSegment] = deque()
         self._next_source_index = 0
         self._finalized = False
+        self._diarization_warning: str | None = None
 
     def push(self, source: str, pcm: bytes) -> None:
         self._require_active()
@@ -262,6 +264,7 @@ class RealtimeASRSession:
             buffered_seconds=buffered_seconds,
             backlogged_windows=backlogged_windows,
             finalized=self._finalized,
+            diarization_warning=self._diarization_warning,
         )
 
     def _process_full_window(self, source: str) -> None:
@@ -306,11 +309,23 @@ class RealtimeASRSession:
         self, source: str, pcm: bytes
     ) -> tuple[str | RealtimeASRResult, tuple[RealtimeSpeakerTurn, ...]]:
         result = self._asr(source, pcm, PCM_SAMPLE_RATE)
-        turns = (
-            self._diarizer(source, pcm, PCM_SAMPLE_RATE)
-            if self._diarizer is not None and source == SOURCE_SYSTEM
-            else ()
-        )
+        turns = ()
+        if self._diarizer is not None and source == SOURCE_SYSTEM:
+            try:
+                turns = self._diarizer(source, pcm, PCM_SAMPLE_RATE)
+            except Exception:
+                self._diarization_warning = (
+                    "Не удалось определить спикеров в одном фрагменте. "
+                    "Распознавание продолжается."
+                )
+                duration = len(pcm) / (PCM_SAMPLE_RATE * PCM_SAMPLE_WIDTH)
+                turns = (
+                    RealtimeSpeakerTurn(
+                        start=0.0,
+                        end=duration,
+                        speaker="Спикер не определён",
+                    ),
+                )
         return result, turns
 
     @staticmethod

@@ -286,6 +286,30 @@ def open_folder(folder_name: str):
     return jsonify(message="Папка открыта в Finder.")
 
 
+@app.post("/api/reveal-file/<path:filename>")
+def reveal_file(filename: str):
+    if Path(filename).name != filename or Path(filename).suffix.lower() not in {
+        ".txt",
+        ".json",
+        ".docx",
+    }:
+        return jsonify(error="Некорректное имя результата."), 404
+    output_dir = OUTPUT_DIR.resolve()
+    path = (output_dir / filename).resolve()
+    if path.parent != output_dir or not path.is_file():
+        return jsonify(error="Результат не найден."), 404
+    try:
+        subprocess.run(
+            ["open", "-R", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        return jsonify(error=f"Не удалось показать файл: {error}"), 500
+    return jsonify(message="Результат показан в Finder.")
+
+
 @app.get("/api/health")
 def health():
     return jsonify(_runtime_identity())

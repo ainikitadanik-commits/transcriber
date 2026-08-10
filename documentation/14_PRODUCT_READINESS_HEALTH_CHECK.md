@@ -1,10 +1,10 @@
 # Product readiness health-check
 
 Статус: internal candidate, внешний release `NO-GO`
-Дата проверки: 2026-08-04
+Дата проверки: 2026-08-10
 Source state: `codex/product-app-release`; точный immutable commit будет записан
 в manifest финального DMG
-Целевая версия: product `.app` 0.2.x
+Целевая версия: product `.app` 0.2.3
 
 ## Verdict
 
@@ -21,11 +21,11 @@ acceptance. Наличие кода, unit tests и ad-hoc `.app` эти P0 не 
 
 | Gate | Результат |
 | --- | --- |
-| Automated suite | PASS, 83/83 |
+| Automated suite | PASS, 90/90 |
 | Frozen runtime identity | PASS: `/api/health` возвращает точные `build_id` и `instance_id` |
 | Offline bundled GigaAM file ASR | PASS |
 | Realtime core/API/UI/export | IMPLEMENTED, automated tests PASS |
-| Realtime anonymous speaker diarization | IMPLEMENTED, real-meeting quality benchmark pending |
+| Realtime anonymous speaker diarization | IMPLEMENTED; 30s/two-speaker integration PASS, real-meeting quality benchmark pending |
 | Live signed system+mic TCC | UNKNOWN |
 | Mach-O compatibility audit | PASS: 417 Mach-O, arm64, minOS <= 15 |
 | Product FFmpeg | PASS: LGPL, network disabled, required filters/muxer/protocols |
@@ -34,12 +34,12 @@ acceptance. Наличие кода, unit tests и ad-hoc `.app` эти P0 не 
 | Final DMG release guard | IMPLEMENTED: requires Developer ID + notary profile, signs and assesses app/DMG |
 | Final signed DMG execution | BLOCKED: Apple identity/profile absent on build Mac |
 
-Offline file-ASR smoke выполнялся с `HF_HUB_OFFLINE=1`, explicit bundled GigaAM
-model directory и без token. Десятисекундный WAV завершился `status=done`:
+Offline file-ASR smoke 0.2.3 выполнялся с `HF_HUB_OFFLINE=1`, explicit bundled
+GigaAM model directory и без token. Один и тот же 30-секундный WAV дважды
+завершился `status=done` без перезаписи первого комплекта:
 
-- TXT 284 B, JSON 2.1 KiB, DOCX 38 KiB;
-- 1 сегмент, 136 символов;
-- `processing.mode=local_windows`;
+- `sample.*` и `sample-2.*`;
+- TXT 216 B, JSON 1.9 KiB, DOCX 38 KiB;
 - `device=cpu`.
 
 Базовый файловый режим использует bundled GigaAM offline и не требует pyannote
@@ -55,9 +55,12 @@ AVAudioEngine microphone-контур, bounded PCM buffers, window scheduler,
 Исходный realtime PCM не должен записываться на диск.
 
 Опциональная realtime-diarization использует word timestamps GigaAM,
-exclusive speaker turns и embeddings pyannote Community-1. Она акустически
+полную timeline для порядка embeddings и exclusive speaker turns для
+таймкодов pyannote Community-1. Она акустически
 разделяет системный звук на анонимные `Спикер N` без интеграции с ВКС и не
-изменяет аудиовход ASR. Unit и service/export contracts подтверждены; реальная
+изменяет аудиовход ASR. Ошибка отдельного окна помечает спикера как
+неопределённого и не завершает ASR. Unit, service/export и 30-секундный
+two-speaker integration подтверждены; реальная
 точность labels, перебивания и дополнительная latency ещё требуют acceptance.
 
 Это не является realtime product acceptance. [ADR-013](11_ARCHITECTURE_DECISIONS.md)

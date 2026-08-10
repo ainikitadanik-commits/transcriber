@@ -33,7 +33,8 @@ class WebTests(unittest.TestCase):
         self.assertIn("RNNT", html)
         self.assertIn("Добавить следующую часть", html)
         self.assertIn('value="auto"', html)
-        self.assertIn("Скачать DOCX", html)
+        self.assertIn("Показать в Finder", html)
+        self.assertIn("Сохранить DOCX…", html)
         self.assertIn("progress-percent", html)
         self.assertIn("Ориентировочный прогресс", html)
         self.assertIn("Открыть записи", html)
@@ -57,6 +58,7 @@ class WebTests(unittest.TestCase):
         self.assertIn('id="live-txt-link"', html)
         self.assertIn('id="live-json-link"', html)
         self.assertIn('id="live-docx-link"', html)
+        self.assertIn('id="live-reveal-result"', html)
         self.assertIn("Системный звук: ожидаем", html)
         self.assertIn("Микрофон: выключен", html)
         self.assertIn('id="live-include-microphone"', html)
@@ -109,6 +111,8 @@ class WebTests(unittest.TestCase):
         self.assertIn("realtimeSourceLabels", javascript)
         self.assertIn("liveDownloads.classList.toggle", javascript)
         self.assertIn("encodeURIComponent(name)", javascript)
+        self.assertIn("function showResultInFinder", javascript)
+        self.assertIn("state.diarization_warning", javascript)
         self.assertIn('window.confirm("Завершить встречу', javascript)
         self.assertIn('document.addEventListener("visibilitychange"', javascript)
         self.assertIn('window.addEventListener("focus", refreshRealtimeStatus)', javascript)
@@ -234,6 +238,40 @@ class WebTests(unittest.TestCase):
             response = self.client.post("/api/open-folder/models")
 
         self.assertEqual(response.status_code, 404)
+        run_mock.assert_not_called()
+
+    def test_reveal_file_selects_existing_output_in_finder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            result = output_dir / "C1-speakers-2.docx"
+            result.write_bytes(b"docx")
+            with (
+                patch.object(web, "OUTPUT_DIR", output_dir),
+                patch.object(web.subprocess, "run") as run_mock,
+            ):
+                response = self.client.post(
+                    "/api/reveal-file/C1-speakers-2.docx"
+                )
+
+        self.assertEqual(response.status_code, 200)
+        run_mock.assert_called_once_with(
+            ["open", "-R", str(result.resolve())],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_reveal_file_rejects_missing_or_unsafe_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(web, "OUTPUT_DIR", Path(directory)),
+                patch.object(web.subprocess, "run") as run_mock,
+            ):
+                missing = self.client.post("/api/reveal-file/missing.docx")
+                unsupported = self.client.post("/api/reveal-file/result.exe")
+
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(unsupported.status_code, 404)
         run_mock.assert_not_called()
 
     def test_rejects_unsupported_file(self):

@@ -1,9 +1,9 @@
 # Упаковка и выпуск
 
 Статус: операционная спецификация
-Актуально на: 2026-08-04
-Текущая версия кода: 0.2.2
-Последний опубликованный релиз: 0.2.1
+Актуально на: 2026-08-10
+Текущая версия кода: 0.2.3
+Последний опубликованный релиз: 0.2.2
 
 ## Два поколения упаковки
 
@@ -13,7 +13,7 @@
 установщиком. Этот путь опубликован в private GitHub release и остаётся
 подтверждённым для 0.1.1.
 
-### Product `.app` 0.2.2
+### Product `.app` 0.2.3
 
 `scripts/build_app_bundle.sh` создаёт:
 
@@ -72,7 +72,7 @@
 6. stapling;
 7. проверку Gatekeeper на чистой учётной записи.
 
-На момент фиксации постоянная signing identity отсутствует, поэтому 0.2.2 не
+На момент фиксации постоянная signing identity отсутствует, поэтому 0.2.3 не
 считается готовой к внешнему распространению.
 
 Internal candidate собран воспроизводимым user-local Python toolchain.
@@ -109,14 +109,16 @@ macOS 15.
 
 JSON schema версионируется отдельно и не обязана совпадать с версией приложения.
 
-## Evidence internal candidate 2026-07-28
+## Evidence internal candidate 2026-08-10
 
-- 72/72 автоматических теста проходят;
+- 90/90 автоматических тестов проходят;
 - frozen runtime `/api/health` возвращает точные `build_id` и `instance_id`;
-- offline file-ASR smoke с `HF_HUB_OFFLINE=1`, explicit bundled GigaAM path и
-  без token завершился `done`: 10-секундный WAV дал TXT 284 B, JSON 2.1 KiB и
-  DOCX 38 KiB, 1 сегмент/136 символов, `processing.mode=local_windows`,
+- offline file-ASR smoke 0.2.3 с `HF_HUB_OFFLINE=1`, explicit bundled GigaAM
+  path и без token дважды завершился `done`: 30-секундный WAV создал независимые
+  комплекты `sample.*` и `sample-2.*`, TXT 216 B, JSON 1.9 KiB и DOCX 38 KiB,
   `device=cpu`;
+- integration pyannote на том же 30-секундном PCM вернул 12 turns и два
+  анонимных профиля без рассогласования embeddings;
 - 417 Mach-O проходят arm64/minOS <= 15 audit;
 - product FFmpeg проходит LGPL/network-disabled capability audit;
 - 41 фактически включённый Python package сопоставлен с license material;

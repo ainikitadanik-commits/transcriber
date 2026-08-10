@@ -28,6 +28,11 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
         case foreign
     }
 
+    private struct DownloadDestination {
+        let temporaryURL: URL
+        let finalURL: URL
+    }
+
     private let dataRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Транскрибатор")
     private var instanceID = UUID().uuidString.lowercased()
@@ -44,6 +49,7 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
     private var didStart = false
     private var interfaceWindow: NSWindow?
     private var webView: WKWebView?
+    private var downloadDestinations: [ObjectIdentifier: DownloadDestination] = [:]
     private let interfaceURL = URL(string: "http://127.0.0.1:7860")!
     private var markerURL: URL {
         dataRoot.appendingPathComponent("runtime-instance.json")
@@ -480,28 +486,101 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
         completionHandler: @escaping (URL?) -> Void
     ) {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = suggestedFilename
-        panel.directoryURL = FileManager.default.urls(
+        let downloadsDirectory = FileManager.default.urls(
             for: .downloadsDirectory,
             in: .userDomainMask
         ).first
+        panel.directoryURL = downloadsDirectory
+        panel.nameFieldStringValue = availableFilename(
+            suggestedFilename,
+            in: downloadsDirectory
+        )
         guard let window = interfaceWindow else {
             completionHandler(nil)
             return
         }
         panel.beginSheetModal(for: window) { result in
-            completionHandler(result == .OK ? panel.url : nil)
+            guard result == .OK, let finalURL = panel.url else {
+                completionHandler(nil)
+                return
+            }
+            let temporaryURL = finalURL.deletingLastPathComponent()
+                .appendingPathComponent(
+                    ".transcriber-\(UUID().uuidString)-\(finalURL.lastPathComponent)"
+                )
+            self.downloadDestinations[ObjectIdentifier(download)] = DownloadDestination(
+                temporaryURL: temporaryURL,
+                finalURL: finalURL
+            )
+            completionHandler(temporaryURL)
         }
     }
 
-    func downloadDidFinish(_ download: WKDownload) {}
+    func downloadDidFinish(_ download: WKDownload) {
+        guard let destination = downloadDestinations.removeValue(
+            forKey: ObjectIdentifier(download)
+        ) else {
+            return
+        }
+        do {
+            if FileManager.default.fileExists(atPath: destination.finalURL.path) {
+                _ = try FileManager.default.replaceItemAt(
+                    destination.finalURL,
+                    withItemAt: destination.temporaryURL
+                )
+            } else {
+                try FileManager.default.moveItem(
+                    at: destination.temporaryURL,
+                    to: destination.finalURL
+                )
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: destination.temporaryURL)
+            showSaveError(error.localizedDescription)
+        }
+    }
 
     func download(
         _ download: WKDownload,
         didFailWithError error: Error,
         resumeData: Data?
     ) {
-        showError("Не удалось сохранить транскрипцию: \(error.localizedDescription)")
+        if let destination = downloadDestinations.removeValue(
+            forKey: ObjectIdentifier(download)
+        ) {
+            try? FileManager.default.removeItem(at: destination.temporaryURL)
+        }
+        showSaveError(error.localizedDescription)
+    }
+
+    private func availableFilename(_ filename: String, in directory: URL?) -> String {
+        guard let directory else { return filename }
+        let requested = directory.appendingPathComponent(filename)
+        guard FileManager.default.fileExists(atPath: requested.path) else {
+            return filename
+        }
+        let fileExtension = requested.pathExtension
+        let stem = requested.deletingPathExtension().lastPathComponent
+        var index = 2
+        while true {
+            var candidate = directory.appendingPathComponent("\(stem)-\(index)")
+            if !fileExtension.isEmpty {
+                candidate.appendPathExtension(fileExtension)
+            }
+            if !FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate.lastPathComponent
+            }
+            index += 1
+        }
+    }
+
+    private func showSaveError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Не удалось сохранить транскрипцию"
+        alert.informativeText = message
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Понятно")
+        alert.runModal()
     }
 
     private func showError(_ message: String) {

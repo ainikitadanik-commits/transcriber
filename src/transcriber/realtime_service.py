@@ -71,6 +71,7 @@ class RealtimeTranscriptionService:
             "error": None,
             "microphone_enabled": False,
             "diarization_enabled": False,
+            "diarization_warning": None,
         }
 
     def start(
@@ -102,6 +103,7 @@ class RealtimeTranscriptionService:
                 "error": None,
                 "microphone_enabled": include_microphone,
                 "diarization_enabled": diarization,
+                "diarization_warning": None,
             }
 
         try:
@@ -244,6 +246,7 @@ class RealtimeTranscriptionService:
         with self._lock:
             self._segments.extend(committed)
             self._provisional = dict(snapshot.provisional)
+            self._state["diarization_warning"] = snapshot.diarization_warning
 
     def _export(self, device: str) -> None:
         with self._lock:
