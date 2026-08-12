@@ -239,10 +239,10 @@ class RealtimeCaptureManager:
 
         process.terminate()
         try:
-            process.wait(timeout=8)
+            process.wait(timeout=1.5)
         except subprocess.TimeoutExpired:
             process.kill()
-            process.wait(timeout=2)
+            process.wait(timeout=0.5)
         return self.snapshot()
 
     def _read_events(self, process: subprocess.Popen[str]) -> None:

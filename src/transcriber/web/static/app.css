@@ -1113,6 +1113,23 @@ select:disabled {
   background: rgba(255, 255, 255, 0.48);
 }
 
+.recovery-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border: 1px solid rgba(181, 126, 20, 0.3);
+  border-radius: var(--radius-card);
+  background: rgba(255, 246, 218, 0.72);
+}
+
+.recovery-card p {
+  margin: 5px 0 0;
+  color: var(--color-text-muted);
+}
+
 .live-transcript > strong {
   color: var(--color-text-primary);
   font-size: 11px;

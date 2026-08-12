@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -10,6 +11,7 @@ from .core import Segment, build_txt, choose_device, write_outputs
 from .gigaam_realtime import load_realtime_adapter
 from .realtime import RealtimeCaptureManager
 from .realtime_diarization import load_realtime_diarizer
+from .realtime_journal import RealtimeSessionJournal, find_recoverable_sessions
 from .realtime_asr import (
     SOURCE_MICROPHONE,
     SOURCE_SYSTEM,
@@ -42,6 +44,7 @@ class RealtimeTranscriptionService:
         window_seconds: float = 12.0,
         overlap_seconds: float = 2.0,
         poll_interval: float = 0.25,
+        sessions_dir: Path | None = None,
     ) -> None:
         self._capture = capture
         self._output_dir = output_dir
@@ -50,9 +53,13 @@ class RealtimeTranscriptionService:
         self._window_seconds = window_seconds
         self._overlap_seconds = overlap_seconds
         self._poll_interval = poll_interval
+        self._sessions_dir = sessions_dir or output_dir.parent / "sessions"
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._session_id: str | None = None
+        self._journal: RealtimeSessionJournal | None = None
+        self._stop_requested = False
         self._include_microphone = False
         self._diarization = False
         self._hf_token: str | None = None
@@ -72,6 +79,7 @@ class RealtimeTranscriptionService:
             "microphone_enabled": False,
             "diarization_enabled": False,
             "diarization_warning": None,
+            "session_id": None,
         }
 
     def start(
@@ -87,6 +95,11 @@ class RealtimeTranscriptionService:
             self._segments = []
             self._provisional = {}
             self._session = None
+            self._session_id = uuid.uuid4().hex
+            self._journal = RealtimeSessionJournal(
+                self._sessions_dir, self._session_id
+            )
+            self._stop_requested = False
             self._include_microphone = include_microphone
             self._diarization = diarization
             self._hf_token = hf_token
@@ -104,7 +117,19 @@ class RealtimeTranscriptionService:
                 "microphone_enabled": include_microphone,
                 "diarization_enabled": diarization,
                 "diarization_warning": None,
+                "session_id": self._session_id,
             }
+            self._journal.create(
+                {
+                    "schema_version": 1,
+                    "session_id": self._session_id,
+                    "started_at": self._state["started_at"],
+                    "completed_at": None,
+                    "microphone_enabled": include_microphone,
+                    "diarization_enabled": diarization,
+                    "device": None,
+                }
+            )
 
         try:
             self._capture.start(include_microphone=include_microphone)
@@ -125,19 +150,28 @@ class RealtimeTranscriptionService:
     def stop(self) -> dict[str, Any]:
         with self._lock:
             thread = self._thread
-            if not thread or not thread.is_alive():
-                already_stopped = True
-            else:
-                already_stopped = False
+            session_id = self._session_id
+            should_stop_capture = bool(
+                thread and thread.is_alive() and not self._stop_requested
+            )
+            if should_stop_capture:
+                self._stop_requested = True
                 self._state.update(
                     asr_status="finalizing",
                     asr_message="Завершаем распознавание оставшегося звука…",
                 )
-        if already_stopped:
-            return self.snapshot()
-        self._capture.stop()
-        self._stop_event.set()
-        return self.snapshot()
+        if should_stop_capture:
+            threading.Thread(
+                target=self._stop_capture_and_signal,
+                daemon=True,
+            ).start()
+        return {"session_id": session_id, "status": "finalizing"}
+
+    def _stop_capture_and_signal(self) -> None:
+        try:
+            self._capture.stop()
+        finally:
+            self._stop_event.set()
 
     def wait(self, timeout: float | None = None) -> bool:
         with self._lock:
@@ -150,19 +184,64 @@ class RealtimeTranscriptionService:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             state = dict(self._state)
-            committed = list(self._segments)
-            provisional = dict(self._provisional)
+            segment_count = len(self._segments)
+            provisional_count = len(self._provisional)
         capture = self._capture.snapshot()
         state.update(capture)
         state["capture"] = capture
-        state["segments"] = [
-            self._segment_payload(segment) for segment in committed
-        ]
-        state["provisional"] = {
-            key: self._segment_payload(segment)
-            for key, segment in provisional.items()
-        }
+        state["segment_count"] = segment_count
+        state["next_cursor"] = segment_count
+        state["provisional_count"] = provisional_count
         return state
+
+    def segments(self, *, after: int = 0, limit: int = 200) -> dict[str, Any]:
+        if after < 0 or limit < 1:
+            raise ValueError("Cursor and limit must be positive.")
+        with self._lock:
+            total = len(self._segments)
+            end = min(after + limit, total)
+            selected = list(self._segments[after:end]) if after < total else []
+        return {
+            "segments": [self._segment_payload(segment) for segment in selected],
+            "next_cursor": end if after < total else total,
+            "has_more": end < total,
+        }
+
+    def recoverable_sessions(self) -> list[dict[str, Any]]:
+        return find_recoverable_sessions(self._sessions_dir)
+
+    def recover(self, session_id: str) -> dict[str, Any]:
+        if (
+            Path(session_id).name != session_id
+            or session_id in {".", ".."}
+            or "/" in session_id
+        ):
+            raise ValueError("Некорректный session_id.")
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                raise RuntimeError("Сначала завершите текущую realtime-сессию.")
+        journal = RealtimeSessionJournal(self._sessions_dir, session_id)
+        metadata = journal.metadata()
+        payloads = journal.load_segments()
+        if metadata.get("completed_at"):
+            raise RuntimeError("Сессия уже завершена.")
+        segments = [RealtimeSegment(**payload) for payload in payloads]
+        with self._lock:
+            self._session_id = session_id
+            self._journal = journal
+            self._segments = segments
+            self._provisional = {}
+            self._diarization = bool(metadata.get("diarization_enabled"))
+            self._include_microphone = bool(metadata.get("microphone_enabled"))
+            self._state.update(
+                session_id=session_id,
+                started_at=metadata.get("started_at"),
+                asr_status="finalizing",
+                asr_message="Восстанавливаем сохранённую транскрипцию…",
+                error=None,
+            )
+        self._export(metadata.get("device") or "unknown")
+        return self.snapshot()
 
     def _run(self) -> None:
         try:
@@ -197,6 +276,9 @@ class RealtimeTranscriptionService:
                     ),
                     device=device,
                 )
+                journal = self._journal
+            if journal is not None:
+                journal.update_metadata({"device": device})
 
             while not self._stop_event.is_set():
                 capture_state = self._capture.snapshot()
@@ -224,10 +306,11 @@ class RealtimeTranscriptionService:
             self._export(device)
         except Exception as error:
             self._hf_token = None
-            try:
-                self._capture.stop()
-            except Exception:
-                pass
+            if not self._stop_requested:
+                try:
+                    self._capture.stop()
+                except Exception:
+                    pass
             with self._lock:
                 self._state.update(
                     asr_status="error",
@@ -243,6 +326,9 @@ class RealtimeTranscriptionService:
         committed = list(snapshot.committed)
         if self._session is not None:
             self._session.drain_committed()
+        journal = self._journal
+        if journal is not None:
+            journal.append(self._segment_payload(segment) for segment in committed)
         with self._lock:
             self._segments.extend(committed)
             self._provisional = dict(snapshot.provisional)
@@ -252,6 +338,7 @@ class RealtimeTranscriptionService:
         with self._lock:
             segments = list(self._segments)
             started_at = self._state["started_at"]
+            journal = self._journal
         core_segments = [
             Segment(
                 start=segment.start,
@@ -340,6 +427,15 @@ class RealtimeTranscriptionService:
                 txt_name=txt.name,
                 json_name=json_path.name,
                 docx_name=docx.name,
+            )
+        if journal is not None:
+            journal.update_metadata(
+                {
+                    "completed_at": completed_at.isoformat(),
+                    "txt_name": txt.name,
+                    "json_name": json_path.name,
+                    "docx_name": docx.name,
+                }
             )
 
     @staticmethod

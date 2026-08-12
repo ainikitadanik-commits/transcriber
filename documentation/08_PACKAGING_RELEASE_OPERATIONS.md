@@ -1,9 +1,11 @@
 # Упаковка и выпуск
 
 Статус: операционная спецификация
-Актуально на: 2026-08-10
-Текущая версия кода: 0.2.3
+Актуально на: 2026-08-12
+Текущая версия кода: 0.2.4 candidate
 Последний опубликованный релиз: 0.2.3 (INTERNAL / UNNOTARIZED)
+
+Следующий candidate: 0.2.4 — recovery и стабилизация длинных realtime-сессий.
 
 ## Два поколения упаковки
 
@@ -13,7 +15,7 @@
 установщиком. Этот путь опубликован в private GitHub release и остаётся
 подтверждённым для 0.1.1.
 
-### Product `.app` 0.2.3
+### Product `.app` 0.2.4
 
 `scripts/build_app_bundle.sh` создаёт:
 
@@ -125,6 +127,25 @@ JSON schema версионируется отдельно и не обязана
 - подпись candidate только ad hoc.
 
 Это внутренний candidate, не transferable product release.
+
+## Evidence 0.2.4 candidate 2026-08-12
+
+- 102/102 автоматических теста проходят;
+- frozen runtime из `.app` возвращает `version=0.2.4` и точные build/instance
+  identity, а новые status, cursor-segments и recovery endpoints отвечают
+  согласованно;
+- Stop подтверждается без ожидания зависшего native capture; повторная команда
+  не запускает вторую остановку;
+- журнал переживает пересоздание service и оборванную последнюю JSONL-запись,
+  после чего создаёт TXT, JSON и DOCX без PCM и token;
+- status остаётся ограниченного размера на синтетической сессии из 5000
+  committed-сегментов, UI хранит не более 200 отображаемых реплик;
+- 417 Mach-O проходят arm64/minOS <= 15 audit;
+- product FFmpeg, 41 license mapping и все вложенные ad-hoc подписи проходят
+  автоматические artifact audits.
+
+Это внутренний ad-hoc candidate. Clean-Mac realtime acceptance и внешний
+Developer ID/notarization gates им не закрыты.
 
 ## Release checklist
 
