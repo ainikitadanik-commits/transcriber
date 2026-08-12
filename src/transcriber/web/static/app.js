@@ -36,6 +36,15 @@ const liveJsonLink = document.querySelector("#live-json-link");
 const liveDocxLink = document.querySelector("#live-docx-link");
 const revealResult = document.querySelector("#reveal-result");
 const liveRevealResult = document.querySelector("#live-reveal-result");
+const liveRecovery = document.querySelector("#live-recovery");
+const liveRecoveryMessage = document.querySelector("#live-recovery-message");
+const liveRecoveryExport = document.querySelector("#live-recovery-export");
+const maxRenderedRealtimeSegments = 200;
+let realtimeSessionId = null;
+let realtimeCursor = 0;
+let realtimeRenderedSegments = 0;
+let realtimeSegmentsRequestActive = false;
+let recoverableRealtimeSessionId = null;
 
 function selectMode(mode) {
   const liveMode = mode === "live";
@@ -111,36 +120,77 @@ function createRealtimeSegment(segment, provisional = false) {
   return item;
 }
 
-function renderRealtimeTranscript(state) {
-  const committed = Array.isArray(state.segments)
-    ? state.segments.filter((segment) => segment && segment.committed !== false && segment.text)
-    : [];
-  const provisional = Object.values(state.provisional || {})
-    .filter((segment) => segment && segment.text);
-
+function showRealtimePlaceholder(message) {
   liveTranscriptContent.replaceChildren();
-  if (committed.length || provisional.length) {
-    committed.forEach((segment) => {
-      liveTranscriptContent.append(createRealtimeSegment(segment));
-    });
-    provisional.forEach((segment) => {
-      liveTranscriptContent.append(createRealtimeSegment(segment, true));
-    });
-    liveTranscriptContent.scrollTop = liveTranscriptContent.scrollHeight;
-    return;
-  }
-
   const placeholder = document.createElement("div");
   placeholder.className = "live-placeholder";
   const text = document.createElement("p");
   text.id = "live-transcript-text";
-  text.textContent = ["loading", "waiting_audio", "running"].includes(state.asr_status)
+  text.textContent = message;
+  placeholder.append(text);
+  liveTranscriptContent.append(placeholder);
+}
+
+function resetRealtimeTranscript(state) {
+  realtimeSessionId = state.session_id || null;
+  realtimeCursor = Math.max(
+    0,
+    Number(state.next_cursor || 0) - maxRenderedRealtimeSegments,
+  );
+  realtimeRenderedSegments = 0;
+  const message = ["loading", "waiting_audio", "running"].includes(state.asr_status)
     ? "Слушаем встречу. Распознанная речь появится здесь с небольшой задержкой."
     : state.asr_status === "finalizing"
       ? "Завершаем распознавание и сохраняем результаты…"
       : "После запуска здесь будет появляться распознанная речь с небольшой задержкой.";
-  placeholder.append(text);
-  liveTranscriptContent.append(placeholder);
+  showRealtimePlaceholder(message);
+}
+
+function appendRealtimeSegments(segments) {
+  const committed = segments.filter(
+    (segment) => segment && segment.committed !== false && segment.text,
+  );
+  if (!committed.length) return;
+  const placeholder = liveTranscriptContent.querySelector(".live-placeholder");
+  if (placeholder) placeholder.remove();
+  committed.forEach((segment) => {
+    liveTranscriptContent.append(createRealtimeSegment(segment));
+    realtimeRenderedSegments += 1;
+  });
+  while (realtimeRenderedSegments > maxRenderedRealtimeSegments) {
+    const first = liveTranscriptContent.querySelector(".live-segment");
+    if (!first) break;
+    first.remove();
+    realtimeRenderedSegments -= 1;
+  }
+  liveTranscriptContent.scrollTop = liveTranscriptContent.scrollHeight;
+}
+
+async function refreshRealtimeSegments(state) {
+  const sessionId = state.session_id || null;
+  if (sessionId !== realtimeSessionId) resetRealtimeTranscript(state);
+  const targetCursor = Number(state.next_cursor || 0);
+  if (!sessionId || realtimeCursor >= targetCursor || realtimeSegmentsRequestActive) return;
+  realtimeSegmentsRequestActive = true;
+  try {
+    do {
+      const response = await fetch(
+        `/api/realtime/segments?after=${realtimeCursor}&limit=${maxRenderedRealtimeSegments}`,
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Не удалось получить новые реплики.");
+      if (sessionId !== realtimeSessionId) return;
+      appendRealtimeSegments(Array.isArray(data.segments) ? data.segments : []);
+      const nextCursor = Number(data.next_cursor);
+      if (!Number.isFinite(nextCursor) || nextCursor <= realtimeCursor) break;
+      realtimeCursor = nextCursor;
+      if (!data.has_more) break;
+    } while (realtimeCursor < targetCursor);
+  } catch (error) {
+    setTextIfChanged(liveNotice, `${error.message} Повторим автоматически.`);
+  } finally {
+    realtimeSegmentsRequestActive = false;
+  }
 }
 
 function renderRealtimeDownloads(state) {
@@ -159,6 +209,7 @@ function renderRealtimeDownloads(state) {
 }
 
 function renderRealtime(state) {
+  if ((state.session_id || null) !== realtimeSessionId) resetRealtimeTranscript(state);
   const captureActive = ["starting", "recording", "stopping"].includes(state.status);
   const asrActive = ["loading", "waiting_audio", "running", "finalizing"].includes(state.asr_status);
   const active = captureActive || asrActive;
@@ -216,7 +267,6 @@ function renderRealtime(state) {
   liveStart.disabled = !state.available || active;
   livePause.disabled = true;
   liveStop.disabled = !active;
-  renderRealtimeTranscript(state);
   renderRealtimeDownloads(state);
 }
 
@@ -226,6 +276,7 @@ async function refreshRealtimeStatus() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Не удалось проверить захват.");
     renderRealtime(data);
+    await refreshRealtimeSegments(data);
   } catch (error) {
     renderRealtime({
       status: "error",
@@ -234,11 +285,48 @@ async function refreshRealtimeStatus() {
       elapsed_seconds: 0,
       asr_status: "error",
       asr_message: error.message,
-      segments: [],
-      provisional: {},
+      session_id: realtimeSessionId,
+      next_cursor: realtimeCursor,
     });
   }
 }
+
+async function refreshRealtimeRecovery() {
+  try {
+    const response = await fetch("/api/realtime/recovery");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось проверить восстановление.");
+    const session = Array.isArray(data.sessions) ? data.sessions[0] : null;
+    recoverableRealtimeSessionId = session?.session_id || null;
+    liveRecovery.classList.toggle("hidden", !data.available || !session);
+    if (data.available) {
+      const count = Number(session?.segment_count || 0);
+      liveRecoveryMessage.textContent = `Сохранено реплик: ${count}. Исходный realtime-звук не записывался.`;
+    }
+  } catch (_error) {
+    liveRecovery.classList.add("hidden");
+  }
+}
+
+liveRecoveryExport.addEventListener("click", async () => {
+  liveRecoveryExport.disabled = true;
+  liveRecoveryMessage.textContent = "Создаём TXT, DOCX и JSON из сохранённой встречи…";
+  try {
+    const response = await fetch("/api/realtime/recovery/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: recoverableRealtimeSessionId }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось восстановить встречу.");
+    renderRealtimeDownloads({ ...data, asr_status: "done" });
+    liveRecovery.classList.add("hidden");
+  } catch (error) {
+    liveRecoveryMessage.textContent = error.message;
+  } finally {
+    liveRecoveryExport.disabled = false;
+  }
+});
 
 liveStart.addEventListener("click", async () => {
   liveStart.disabled = true;
@@ -257,6 +345,7 @@ liveStart.addEventListener("click", async () => {
     liveHfToken.value = "";
     if (!response.ok) throw new Error(data.error || "Не удалось начать встречу.");
     renderRealtime(data);
+    await refreshRealtimeSegments(data);
   } catch (error) {
     liveNotice.textContent = error.message;
     liveState.textContent = "Ошибка";
@@ -265,20 +354,45 @@ liveStart.addEventListener("click", async () => {
   }
 });
 
+async function requestRealtimeStop() {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch("/api/realtime/stop", {
+        method: "POST",
+        signal: controller.signal,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Не удалось завершить встречу.");
+      return data;
+    } catch (error) {
+      lastError = error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+  throw lastError || new Error("Не удалось завершить встречу.");
+}
+
 liveStop.addEventListener("click", async () => {
   if (!window.confirm("Завершить встречу и сохранить транскрипцию?")) return;
   liveStop.disabled = true;
+  setTextIfChanged(liveState, "Завершаем");
+  setTextIfChanged(liveNotice, "Останавливаем захват и сохраняем встречу…");
   try {
-    const response = await fetch("/api/realtime/stop", { method: "POST" });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Не удалось завершить встречу.");
-    renderRealtime(data);
+    await requestRealtimeStop();
+    setTextIfChanged(liveNotice, "Команда завершения принята. Сохраняем документы…");
+    await refreshRealtimeStatus();
   } catch (error) {
-    liveNotice.textContent = error.message;
+    liveNotice.textContent = `${error.message} Текст встречи продолжает сохраняться локально.`;
+    await refreshRealtimeStatus();
   }
 });
 
 refreshRealtimeStatus();
+refreshRealtimeRecovery();
 setInterval(refreshRealtimeStatus, 1500);
 
 // Realtime-сессия принадлежит локальному backend, а не браузерной вкладке.

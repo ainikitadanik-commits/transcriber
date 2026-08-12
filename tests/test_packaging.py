@@ -47,7 +47,7 @@ class PackagingTests(unittest.TestCase):
         )
         self.assertEqual(info["CFBundleExecutable"], "Transcriber")
         self.assertEqual(info["CFBundleIconFile"], "Transcriber.icns")
-        self.assertEqual(info["CFBundleShortVersionString"], "0.2.3")
+        self.assertEqual(info["CFBundleShortVersionString"], "0.2.4")
         self.assertFalse(info.get("LSUIElement", False))
         self.assertIn("локальной транскрибации", info["NSMicrophoneUsageDescription"])
         self.assertIn("локальной транскрибации", info["NSAudioCaptureUsageDescription"])
@@ -59,6 +59,31 @@ class PackagingTests(unittest.TestCase):
         self.assertIn(".transcriber-", source)
         self.assertIn("replaceItemAt(", source)
         self.assertIn("downloadDidFinish", source)
+
+    def test_native_product_blocks_dmg_launch_before_runtime(self):
+        source = (ROOT / "native/realtime_capture.swift").read_text()
+
+        start = source.index("func start()")
+        launch = source.index("try launchRuntime()", start)
+        location_guard = source.index("productLaunchRequiresInstallation(", start)
+        self.assertLess(location_guard, launch)
+        self.assertIn('normalizedBundlePath.hasPrefix("/Volumes/")', source)
+        self.assertIn("bundleParentWritable", source)
+        self.assertIn("Переместите Транскрибатор в Applications", source)
+
+    def test_native_menu_can_stop_meeting_without_quitting(self):
+        source = (ROOT / "native/realtime_capture.swift").read_text()
+
+        self.assertIn('withTitle: "Завершить встречу"', source)
+        self.assertIn("#selector(stopMeetingFromMenu)", source)
+        stop_action = source[
+            source.index("@objc private func stopMeetingFromMenu()") :
+            source.index("@objc private func pollRuntime()")
+        ]
+        self.assertIn('appendingPathComponent("api/realtime/stop")', stop_action)
+        self.assertIn('request.httpMethod = "POST"', stop_action)
+        self.assertIn("timeoutIntervalForResource = 4", stop_action)
+        self.assertNotIn("terminate(", stop_action)
 
     def test_audio_input_entitlement_is_enabled(self):
         with (

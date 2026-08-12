@@ -6,6 +6,22 @@ import Foundation
 import UniformTypeIdentifiers
 import WebKit
 
+func productLaunchRequiresInstallation(
+    bundlePath: String,
+    bundleParentWritable: Bool,
+    homePath: String
+) -> Bool {
+    let normalizedBundlePath = URL(fileURLWithPath: bundlePath)
+        .standardizedFileURL.path
+    let normalizedHomePath = URL(fileURLWithPath: homePath)
+        .standardizedFileURL.path
+    let isMountedImage = normalizedBundlePath == "/Volumes"
+        || normalizedBundlePath.hasPrefix("/Volumes/")
+    let isInstalledApplication = normalizedBundlePath.hasPrefix("/Applications/")
+        || normalizedBundlePath.hasPrefix("\(normalizedHomePath)/Applications/")
+    return isMountedImage || (!bundleParentWritable && !isInstalledApplication)
+}
+
 @MainActor
 final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
     WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate
@@ -49,6 +65,7 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
     private var didStart = false
     private var interfaceWindow: NSWindow?
     private var webView: WKWebView?
+    private var stopRequestInFlight = false
     private var downloadDestinations: [ObjectIdentifier: DownloadDestination] = [:]
     private let interfaceURL = URL(string: "http://127.0.0.1:7860")!
     private var markerURL: URL {
@@ -63,6 +80,18 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
         guard !didStart else { return }
         didStart = true
         configureMenuBar()
+        let bundleURL = Bundle.main.bundleURL.standardizedFileURL
+        let bundleParent = bundleURL.deletingLastPathComponent()
+        guard !productLaunchRequiresInstallation(
+            bundlePath: bundleURL.path,
+            bundleParentWritable: FileManager.default.isWritableFile(
+                atPath: bundleParent.path
+            ),
+            homePath: FileManager.default.homeDirectoryForCurrentUser.path
+        ) else {
+            showInstallationRequired()
+            return
+        }
         if let marker = readRuntimeMarker(), marker.buildID == buildID {
             switch interfaceState(
                 expectedInstanceID: marker.instanceID,
@@ -121,6 +150,11 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
         menu.addItem(
             withTitle: "Открыть транскрибатор",
             action: #selector(openInterfaceFromMenu),
+            keyEquivalent: ""
+        )
+        menu.addItem(
+            withTitle: "Завершить встречу",
+            action: #selector(stopMeetingFromMenu),
             keyEquivalent: ""
         )
         menu.addItem(
@@ -592,6 +626,27 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
         alert.runModal()
     }
 
+    private func showInstallationRequired() {
+        let alert = NSAlert()
+        alert.messageText = "Переместите Транскрибатор в Applications"
+        alert.informativeText =
+            "Приложение запущено из образа диска или защищённой папки. "
+            + "Закройте его, перетащите «Транскрибатор» в папку Applications "
+            + "и запустите снова. Realtime не запущен."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Понятно")
+        alert.runModal()
+    }
+
+    private func showStopFeedback(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Понятно")
+        alert.runModal()
+    }
+
     private func productError(_ message: String) -> NSError {
         NSError(
             domain: Bundle.main.bundleIdentifier ?? "Transcriber",
@@ -602,6 +657,47 @@ final class ProductApplicationDelegate: NSObject, NSApplicationDelegate,
 
     @objc private func openInterfaceFromMenu() {
         openInterface()
+    }
+
+    @objc private func stopMeetingFromMenu() {
+        guard !stopRequestInFlight else { return }
+        stopRequestInFlight = true
+
+        var request = URLRequest(
+            url: interfaceURL.appendingPathComponent("api/realtime/stop"),
+            timeoutInterval: 4
+        )
+        request.httpMethod = "POST"
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 4
+        configuration.timeoutIntervalForResource = 4
+        let session = URLSession(configuration: configuration)
+        session.dataTask(with: request) { [weak self] _, response, error in
+            session.finishTasksAndInvalidate()
+            Task { @MainActor in
+                guard let self else { return }
+                self.stopRequestInFlight = false
+                if let status = (response as? HTTPURLResponse)?.statusCode,
+                   (200..<300).contains(status)
+                {
+                    self.showStopFeedback(
+                        title: "Завершение встречи запущено",
+                        message: "Захват останавливается, транскрипция сохраняется."
+                    )
+                } else if (error as? URLError)?.code == .timedOut {
+                    self.showStopFeedback(
+                        title: "Команда завершения отправлена",
+                        message: "Локальный сервер не успел ответить за 4 секунды. "
+                            + "Не закрывайте приложение: подождите сохранения файлов."
+                    )
+                } else {
+                    self.showStopFeedback(
+                        title: "Не удалось завершить встречу",
+                        message: "Локальный сервер недоступен. Откройте Транскрибатор и повторите."
+                    )
+                }
+            }
+        }.resume()
     }
 
     @objc private func pollRuntime() {

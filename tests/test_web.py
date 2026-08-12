@@ -105,15 +105,18 @@ class WebTests(unittest.TestCase):
         self.assertIn('title.title = filename', javascript)
         self.assertIn('submitLabel.textContent = loading ? "Транскрибируем…"', javascript)
         self.assertIn('livePause.disabled = true', javascript)
-        self.assertIn("function renderRealtimeTranscript", javascript)
-        self.assertIn("state.segments", javascript)
-        self.assertIn("state.provisional", javascript)
+        self.assertIn("async function refreshRealtimeSegments", javascript)
+        self.assertIn("/api/realtime/segments?after=", javascript)
+        self.assertIn("maxRenderedRealtimeSegments = 200", javascript)
+        self.assertNotIn("state.segments", javascript)
         self.assertIn("realtimeSourceLabels", javascript)
         self.assertIn("liveDownloads.classList.toggle", javascript)
         self.assertIn("encodeURIComponent(name)", javascript)
         self.assertIn("function showResultInFinder", javascript)
         self.assertIn("state.diarization_warning", javascript)
         self.assertIn('window.confirm("Завершить встречу', javascript)
+        self.assertIn("async function requestRealtimeStop", javascript)
+        self.assertIn("/api/realtime/recovery/export", javascript)
         self.assertIn('document.addEventListener("visibilitychange"', javascript)
         self.assertIn('window.addEventListener("focus", refreshRealtimeStatus)', javascript)
         self.assertNotIn('addEventListener("pagehide"', javascript)
@@ -127,13 +130,60 @@ class WebTests(unittest.TestCase):
                 "status": "idle",
                 "available": True,
                 "asr_status": "idle",
-                "segments": [],
+                "segment_count": 0,
+                "next_cursor": 0,
             },
         ):
             response = self.client.get("/api/realtime/status")
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.get_json()["available"])
+
+    def test_realtime_segments_validates_and_forwards_cursor(self):
+        with patch.object(
+            web.realtime_service,
+            "segments",
+            return_value={"segments": [], "next_cursor": 42, "has_more": False},
+        ) as segments_mock:
+            response = self.client.get("/api/realtime/segments?after=42&limit=10")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["next_cursor"], 42)
+        segments_mock.assert_called_once_with(after=42, limit=10)
+        self.assertEqual(
+            self.client.get("/api/realtime/segments?after=-1").status_code, 400
+        )
+
+    def test_realtime_recovery_contract_and_export(self):
+        sessions = [{"session_id": "abc", "segment_count": 3}]
+        with (
+            patch.object(
+                web.realtime_service, "recoverable_sessions", return_value=sessions
+            ),
+            patch.object(
+                web.realtime_service,
+                "recover",
+                return_value={"session_id": "abc", "txt_name": "meeting.txt"},
+            ) as recover_mock,
+        ):
+            available = self.client.get("/api/realtime/recovery")
+            exported = self.client.post(
+                "/api/realtime/recovery/export", json={"session_id": "abc"}
+            )
+
+        self.assertEqual(
+            available.get_json(),
+            {
+                "available": True,
+                "session_id": "abc",
+                "started_at": None,
+                "segment_count": 3,
+                "sessions": sessions,
+            },
+        )
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported.get_json()["txt_name"], "meeting.txt")
+        recover_mock.assert_called_once_with("abc")
 
     def test_realtime_start_and_stop_use_local_capture_manager(self):
         with (

@@ -320,6 +320,46 @@ def realtime_status():
     return jsonify(realtime_service.snapshot())
 
 
+@app.get("/api/realtime/segments")
+def realtime_segments():
+    try:
+        after = int(request.args.get("after", 0))
+        limit = int(request.args.get("limit", 200))
+    except ValueError:
+        return jsonify(error="after и limit должны быть целыми числами."), 400
+    if after < 0 or not 1 <= limit <= 1000:
+        return jsonify(error="after >= 0, limit должен быть от 1 до 1000."), 400
+    return jsonify(realtime_service.segments(after=after, limit=limit))
+
+
+@app.get("/api/realtime/recovery")
+def realtime_recovery():
+    sessions = realtime_service.recoverable_sessions()
+    latest = sessions[0] if sessions else {}
+    return jsonify(
+        available=bool(sessions),
+        session_id=latest.get("session_id"),
+        started_at=latest.get("started_at"),
+        segment_count=latest.get("segment_count", 0),
+        sessions=sessions,
+    )
+
+
+@app.post("/api/realtime/recovery/export")
+def realtime_recover():
+    payload = request.get_json(silent=True) or {}
+    session_id = payload.get("session_id")
+    if session_id is None:
+        sessions = realtime_service.recoverable_sessions()
+        session_id = sessions[0]["session_id"] if sessions else None
+    if not isinstance(session_id, str) or not session_id:
+        return jsonify(error="Нет незавершённой realtime-сессии."), 404
+    try:
+        return jsonify(realtime_service.recover(session_id)), 200
+    except (OSError, ValueError, RuntimeError) as error:
+        return jsonify(error=str(error)), 409
+
+
 @app.post("/api/realtime/start")
 def realtime_start():
     payload = request.get_json(silent=True) or {}

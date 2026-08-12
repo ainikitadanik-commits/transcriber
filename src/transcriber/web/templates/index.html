@@ -166,6 +166,14 @@
         </div>
 
         <section class="mode-panel live-mode hidden" id="live-mode-panel" role="tabpanel" aria-labelledby="mode-live">
+          <section class="recovery-card hidden" id="live-recovery" aria-live="polite">
+            <div>
+              <strong>Найдена незавершённая встреча</strong>
+              <p id="live-recovery-message">Можно восстановить уже распознанный текст и сохранить документы.</p>
+            </div>
+            <button class="download" id="live-recovery-export" type="button">Восстановить транскрипцию</button>
+          </section>
+
           <div class="live-heading">
             <div>
               <p class="eyebrow">Живая встреча</p>
