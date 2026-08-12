@@ -45,6 +45,7 @@ let realtimeCursor = 0;
 let realtimeRenderedSegments = 0;
 let realtimeSegmentsRequestActive = false;
 let recoverableRealtimeSessionId = null;
+let realtimeStopRequested = false;
 
 function selectMode(mode) {
   const liveMode = mode === "live";
@@ -213,6 +214,11 @@ function renderRealtime(state) {
   const captureActive = ["starting", "recording", "stopping"].includes(state.status);
   const asrActive = ["loading", "waiting_audio", "running", "finalizing"].includes(state.asr_status);
   const active = captureActive || asrActive;
+  if (!active || state.asr_status === "error" || state.status === "error") {
+    realtimeStopRequested = false;
+  } else if (state.asr_status === "finalizing" || state.status === "stopping") {
+    realtimeStopRequested = true;
+  }
   const stateLabel = {
     idle: "Готово к встрече",
     loading: "Загружаем модель",
@@ -266,7 +272,8 @@ function renderRealtime(state) {
   liveHfToken.disabled = active;
   liveStart.disabled = !state.available || active;
   livePause.disabled = true;
-  liveStop.disabled = !active;
+  liveStop.disabled = !active || realtimeStopRequested;
+  liveStop.setAttribute("aria-busy", String(realtimeStopRequested));
   renderRealtimeDownloads(state);
 }
 
@@ -377,8 +384,10 @@ async function requestRealtimeStop() {
 }
 
 liveStop.addEventListener("click", async () => {
-  if (!window.confirm("Завершить встречу и сохранить транскрипцию?")) return;
+  if (realtimeStopRequested) return;
+  realtimeStopRequested = true;
   liveStop.disabled = true;
+  liveStop.setAttribute("aria-busy", "true");
   setTextIfChanged(liveState, "Завершаем");
   setTextIfChanged(liveNotice, "Останавливаем захват и сохраняем встречу…");
   try {
@@ -386,6 +395,7 @@ liveStop.addEventListener("click", async () => {
     setTextIfChanged(liveNotice, "Команда завершения принята. Сохраняем документы…");
     await refreshRealtimeStatus();
   } catch (error) {
+    realtimeStopRequested = false;
     liveNotice.textContent = `${error.message} Текст встречи продолжает сохраняться локально.`;
     await refreshRealtimeStatus();
   }
