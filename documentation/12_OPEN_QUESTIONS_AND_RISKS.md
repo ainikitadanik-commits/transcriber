@@ -1,7 +1,7 @@
 # Открытые вопросы и риски
 
 Статус: живой реестр
-Актуально на: 2026-07-28
+Актуально на: 2026-08-12
 
 ## Правила
 
@@ -23,7 +23,7 @@
 | OQ-007 | P1 | Как устанавливать product `.app` в user-local Applications из DMG? | чистая Mac acceptance |
 | OQ-008 | P2 | Как ротировать logs и очищать брошенные upload directories? | storage policy и privacy review |
 | OQ-009 | P2 | Нужен ли постоянный job history и безопасная отмена? | product intent после realtime |
-| OQ-010 | P2 | Как разрешать конфликт, если порт 7860 занят другим процессом? | internal build/instance identity реализована; нужен packaged conflict/cleanup test |
+| OQ-010 | P1 | Как разрешать конфликт фиксированного порта 7860? Реальный конфликт подтверждён на Mac коллеги после установки 0.2.4 | BL-001: динамический loopback-порт, перенос порта в runtime marker и packaged update/conflict/cleanup tests |
 | OQ-011 | P1 | Какой минимальный контрольный аудионабор допустимо хранить для QA? | права на записи и fixture policy |
 | OQ-012 | P2 | Когда прекращать fallback к `~/.cache/gigaam`? | миграция и telemetry-free verification |
 | OQ-013 | P0 | Проходит ли Core Audio Tap system-audio prompt на реальном корпоративном no-admin Mac? | ADR-013 signed spike и evidence bundle |
@@ -52,6 +52,7 @@
 | R-017 | P1 | TCC denial показывается как общий сбой | structured denied/managed_denied покрыты тестами | live localized TCC/MDM evidence отсутствует |
 | R-018 | P0 | Artifact не запускается на заявленной macOS 15+ | 417 Mach-O arm64/minOS <= 15 audit PASS | реальный запуск на чистой macOS 15 |
 | R-019 | P0 | License bundle не соответствует runtime | 41 Python package сопоставлен с license material | повторить audit на final signed artifact |
+| R-020 | P1 | Старый runtime или другое локальное приложение занимает 7860 и блокирует запуск `.app` | строгая проверка build/instance не позволяет подключиться к чужому сервису; документирован ручной cleanup | фиксированный порт остаётся single point of failure; реализовать BL-001 и packaged acceptance |
 
 ## Известные расхождения на дату фиксации
 
